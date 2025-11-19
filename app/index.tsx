@@ -1,12 +1,22 @@
-import { loadLlamaModelInfo } from 'llama.rn';
-import { useEffect } from 'react';
-import { Text, View } from "react-native";
+import { initLlama, loadLlamaModelInfo } from 'llama.rn';
+import React, { useEffect, useState } from 'react';
+import { Button, Text, TextInput, View } from "react-native";
 
+interface ModelResponse {
+  message: string;
+  timeTaken: number
+}
 export default function Index() {
+  const [userMessage, setUserMessage] = useState("")
+  const [llmResponse, setLlmResponse] = useState<ModelResponse>({
+    message: "",
+    timeTaken: 0
+  })
+  
   const modelPath = 'file:///tmp/Llama-3.2-3B-Instruct-Q4_K_M.gguf'
 
   useEffect(() => {
-    loadModel()
+    loadModel(modelPath)
   }, [])
   
   return (
@@ -17,17 +27,32 @@ export default function Index() {
         alignItems: "center",
       }}
     >
-      <Text>Edit app/index.tsx to edit this screen.</Text>
+      <Text>Try the AI out</Text>
+      <TextInput
+          onChangeText={(text: string) => {setUserMessage(text)}}
+          value={userMessage}
+          placeholder="Enter message"
+        />
+      <Button
+        onPress={() => makeQuery(modelPath, userMessage)}
+        title="Ask AI"
+      />
+      <View>
+        <Text>
+          {
+            `Response: ${llmResponse.message}\n Time taken: ${llmResponse.timeTaken}`
+          }
+        </Text>
+      </View>
     </View>
   );
 }
 
 async function loadModel(path:string) {
-  
   console.log('Model Info:', await loadLlamaModelInfo(path))
 }
 
-async function makeQuery(path:string) {
+async function makeQuery(path:string, userMessage: string): Promise<ModelResponse> {
   // Initial a Llama context with the model (may take a while)
   const context = await initLlama({
     model: path,
@@ -48,7 +73,7 @@ async function makeQuery(path:string) {
         },
         {
           role: 'user',
-          content: 'Hello!',
+          content: `${userMessage}`,
         },
       ],
       n_predict: 100,
@@ -56,9 +81,13 @@ async function makeQuery(path:string) {
     },
     ({ token }) => {
       // This is a partial completion callback, meaning the data will stream as it returns tokens
-      // liveText += token will add a state or something as it goes
+      // modelResponse += token will add a state or something as it goes, make sure to move this out of component otherwise it will rerender over n over
     },
   )
   console.log('Result:', msgResult.text)
   console.log('Timings:', msgResult.timings)
+  return ({
+    message: msgResult.text,
+    timeTaken: msgResult.timings
+  })
 }
