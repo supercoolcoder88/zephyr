@@ -19,7 +19,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.zephyr.app"
     },
     "web": {
       "bundler": "metro"
@@ -37,11 +38,31 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesNativeLibrary": [
+              {
+                "name": "libOpenCL.so",
+                "required": false
+              }
+            ]
+          }
+        }
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "1ded247c-a46d-4604-a6fc-f369727e9547"
+      }
     }
   }
 }

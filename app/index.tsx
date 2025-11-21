@@ -1,93 +1,77 @@
-import { initLlama, loadLlamaModelInfo } from 'llama.rn';
 import React, { useEffect, useState } from 'react';
-import { Button, Text, TextInput, View } from "react-native";
+import { Button, ScrollView, Text, TextInput, View } from "react-native";
+import { useLLM, LLAMA3_2_3B_QLORA, Message } from 'react-native-executorch';
 
-interface ModelResponse {
-  message: string;
-  timeTaken: number
-}
 export default function Index() {
-  const [userMessage, setUserMessage] = useState("")
-  const [llmResponse, setLlmResponse] = useState<ModelResponse>({
-    message: "",
-    timeTaken: 0
-  })
-  
-  const modelPath = 'file:///tmp/Llama-3.2-3B-Instruct-Q4_K_M.gguf'
+  const [userMessage, setUserMessage] = useState("");
+  const [llmResponse, setLlmResponse] = useState("");
+  const [startQueryTime, setStartQueryTime] = useState(0)
+  const [timeTaken, setTimeTaken] = useState(0)
+
+  const llm = useLLM({ model: LLAMA3_2_3B_QLORA });
+
+  function makeQuery(message: string) {
+    console.log("Starting query...");
+    setStartQueryTime(Date.now())
+
+    const chat: Message[] = [
+      { role: 'system', content: 'You are a helpful assistant' },
+      { role: 'user', content: message }
+    ];
+
+    llm.generate(chat);
+  }
+
+  // This watches for response updates from the hook
+  useEffect(() => {
+    if (llm.response) {
+      setLlmResponse(llm.response);
+    }
+  }, [llm.response]);
 
   useEffect(() => {
-    loadModel(modelPath)
-  }, [])
-  
+    if (!llm.isGenerating && startQueryTime !== 0) {
+      const total = Date.now() - startQueryTime;
+      setTimeTaken(total);
+      console.log("Generation completed in", total / 1000, "s");
+    }
+  }, [llm.isGenerating, startQueryTime]);
+
   return (
-    <View
-      style={{
-        flex: 1,
-        justifyContent: "center",
-        alignItems: "center",
-      }}
-    >
-      <Text>Try the AI out</Text>
-      <TextInput
-          onChangeText={(text: string) => {setUserMessage(text)}}
-          value={userMessage}
-          placeholder="Enter message"
-        />
-      <Button
-        onPress={() => makeQuery(modelPath, userMessage)}
-        title="Ask AI"
-      />
-      <View>
-        <Text>
-          {
-            `Response: ${llmResponse.message}\n Time taken: ${llmResponse.timeTaken}`
-          }
-        </Text>
-      </View>
+    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 20 }}>
+      {
+        llm.error ? (
+          <Text>I BROKE</Text>
+        ) : !llm.isReady ? (
+          <Text>{(llm.downloadProgress * 100).toFixed(2).toString()}%</Text>
+        ) : (
+          <>
+            <ScrollView className="flex-1">
+              <Text>{`Response: ${llmResponse}`}</Text>
+            </ScrollView>
+            <Text>{`Time taken ${timeTaken}`}</Text>
+            <TextInput
+              onChangeText={setUserMessage}
+              value={userMessage}
+              placeholder="Enter message"
+              style={{ width: "100%", borderWidth: 1, padding: 8, marginVertical: 10 }}
+            />
+
+            <View className="flex-row gap-3 mb-4">
+              <Button title="Ask AI" onPress={() => makeQuery(userMessage)} />
+              <Button
+                title="Clear"
+                onPress={() => {
+                  setUserMessage("");
+                  setLlmResponse("");
+                  setTimeTaken(0);
+                }}
+              />
+            </View>
+            
+          </>
+        )
+      }
     </View>
   );
-}
-
-async function loadModel(path:string) {
-  console.log('Model Info:', await loadLlamaModelInfo(path))
-}
-
-async function makeQuery(path:string, userMessage: string): Promise<ModelResponse> {
-  // Initial a Llama context with the model (may take a while)
-  const context = await initLlama({
-    model: path,
-    use_mlock: true,
-    n_ctx: 2048, // context window, max is 4096
-    n_gpu_layers: 99,
-  })
-
-  const stopWords = ['</s>', '<|end|>', '<|eot_id|>', '<|end_of_text|>', '<|im_end|>', '<|EOT|>', '<|END_OF_TURN_TOKEN|>', '<|end_of_turn|>', '<|endoftext|>']
-
-  // Do chat completion
-  const msgResult = await context.completion(
-    {
-      messages: [
-        {
-          role: 'system',
-          content: 'This is a conversation between user and assistant, a friendly chatbot.',
-        },
-        {
-          role: 'user',
-          content: `${userMessage}`,
-        },
-      ],
-      n_predict: 100,
-      stop: stopWords,
-    },
-    ({ token }) => {
-      // This is a partial completion callback, meaning the data will stream as it returns tokens
-      // modelResponse += token will add a state or something as it goes, make sure to move this out of component otherwise it will rerender over n over
-    },
-  )
-  console.log('Result:', msgResult.text)
-  console.log('Timings:', msgResult.timings)
-  return ({
-    message: msgResult.text,
-    timeTaken: msgResult.timings
-  })
 }
