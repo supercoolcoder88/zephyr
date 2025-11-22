@@ -39,20 +39,14 @@
           }
         }
       ],
+      "expo-asset",
       [
-        "expo-build-properties",
+        "expo-sqlite",
         {
-          "android": {
-            "usesNativeLibrary": [
-              {
-                "name": "libOpenCL.so",
-                "required": false
-              }
-            ]
-          }
+          "enableFTS": true,
+          "withSQLiteVecExtension": true
         }
-      ],
-      "expo-asset"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
