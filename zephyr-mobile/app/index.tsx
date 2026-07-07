@@ -1,19 +1,22 @@
-import { StyleSheet, Text, View } from 'react-native';
-import "../global.css"
+import { Text, View } from "react-native";
+import { useSQLiteContext, type SQLiteDatabase } from "expo-sqlite";
 
-export default function App() {
+type HomeContentProps = {
+  database: SQLiteDatabase;
+};
+
+function HomeContent({ database }: HomeContentProps) {
   return (
-    <View style={styles.container}>
+    <View>
       <Text>Open up app/index.tsx to start working on your app!</Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default function App() {
+  const database = useSQLiteContext();
+
+  return (
+    <HomeContent database={database} />
+  );
+}

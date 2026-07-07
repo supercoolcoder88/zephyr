@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@tanstack/react-query": "^5.101.2",
     "expo": "~57.0.4",
     "expo-constants": "~57.0.3",
     "expo-linking": "~57.0.2",
     "expo-router": "~57.0.4",
+    "expo-sqlite": "~57.0.0",
     "expo-status-bar": "~57.0.0",
     "nativewind": "^4.2.6",
     "react": "19.2.3",
