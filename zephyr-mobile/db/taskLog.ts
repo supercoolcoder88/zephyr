@@ -50,6 +50,14 @@ export function getTaskLog(
   );
 }
 
+export function getAllTaskLogs(database: SQLiteDatabase): Promise<TaskLog[]> {
+  return database.getAllAsync<TaskLogRow>(`
+    SELECT task_id AS taskId, date, status
+    FROM task_log
+    ORDER BY date, task_id
+  `);
+}
+
 export async function updateTaskLog(
   database: SQLiteDatabase,
   taskId: number,

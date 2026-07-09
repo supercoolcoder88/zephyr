@@ -41,6 +41,12 @@ export function getTask(
   );
 }
 
+export function getAllTasks(database: SQLiteDatabase): Promise<Task[]> {
+  return database.getAllAsync<Task>(
+    "SELECT id, title, deadline FROM task ORDER BY id",
+  );
+}
+
 export async function updateTask(
   database: SQLiteDatabase,
   id: number,

@@ -36,6 +36,10 @@ export function getTag(
   );
 }
 
+export function getAllTags(database: SQLiteDatabase): Promise<Tag[]> {
+  return database.getAllAsync<Tag>("SELECT id, title FROM tag ORDER BY id");
+}
+
 export async function updateTag(
   database: SQLiteDatabase,
   id: number,

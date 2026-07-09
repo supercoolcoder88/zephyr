@@ -10,10 +10,6 @@ export type HabitLog = {
 
 export type CreateHabitLogInput = HabitLog;
 
-export type UpdateHabitLogInput = {
-  status?: HabitLogStatus;
-};
-
 type HabitLogRow = {
   habitId: number;
   date: string;
@@ -50,22 +46,45 @@ export function getHabitLog(
   );
 }
 
-export async function updateHabitLog(
+export function getAllHabitLogs(database: SQLiteDatabase): Promise<HabitLog[]> {
+  return database.getAllAsync<HabitLogRow>(`
+    SELECT habit_id AS habitId, date, status
+    FROM habit_log
+    ORDER BY date, habit_id
+  `);
+}
+
+export async function updateHabitLogStatus(
   database: SQLiteDatabase,
   habitId: number,
   date: string,
-  input: UpdateHabitLogInput,
-): Promise<HabitLog | null> {
-  if (input.status !== undefined) {
+): Promise<HabitLog> {
+  const currentLog = await getHabitLog(database, habitId, date);
+  const currentStatus: HabitLogStatus = currentLog?.status ?? "INCOMPLETE";
+  const nextStatus: HabitLogStatus =
+    currentStatus === "COMPLETE" ? "INCOMPLETE" : "COMPLETE";
+
+  if (currentLog) {
     await database.runAsync(
       "UPDATE habit_log SET status = ? WHERE habit_id = ? AND date = ?",
-      input.status,
+      nextStatus,
       habitId,
       date,
     );
+  } else {
+    await database.runAsync(
+      "INSERT INTO habit_log (habit_id, date, status) VALUES (?, ?, ?)",
+      habitId,
+      date,
+      nextStatus,
+    );
   }
 
-  return getHabitLog(database, habitId, date);
+  return {
+    habitId,
+    date,
+    status: nextStatus,
+  };
 }
 
 export async function deleteHabitLog(

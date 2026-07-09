@@ -84,6 +84,22 @@ export function getDailyReview(
   );
 }
 
+export function getAllDailyReviews(
+  database: SQLiteDatabase,
+): Promise<DailyReview[]> {
+  return database.getAllAsync<DailyReviewRow>(`
+    SELECT
+      id,
+      date,
+      sleep_score AS sleepScore,
+      energy_score AS energyScore,
+      day_score AS dayScore,
+      screen_time AS screenTime
+    FROM daily_review
+    ORDER BY date
+  `);
+}
+
 export async function updateDailyReview(
   database: SQLiteDatabase,
   id: number,

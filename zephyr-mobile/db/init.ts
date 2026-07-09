@@ -7,7 +7,7 @@ export async function initDatabase(database: SQLite.SQLiteDatabase) {
     CREATE TABLE IF NOT EXISTS habit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
-      score INTEGER NOT NULL DEFAULT 0
+      score INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS habit_log (

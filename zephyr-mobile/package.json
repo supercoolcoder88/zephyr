@@ -1,7 +1,7 @@
 {
   "name": "zephyr-mobile",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "./index.js",
   "dependencies": {
     "@tanstack/react-query": "^5.101.2",
     "expo": "~57.0.4",
@@ -13,9 +13,11 @@
     "nativewind": "^4.2.6",
     "react": "19.2.3",
     "react-native": "0.86.0",
-    "react-native-reanimated": "^4.5.1",
+    "react-native-reanimated": "4.5.0",
     "react-native-safe-area-context": "~5.7.0",
-    "react-native-screens": "4.25.2"
+    "react-native-screens": "4.25.2",
+    "react-native-worklets": "0.10.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
