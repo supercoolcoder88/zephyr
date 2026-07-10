@@ -18,13 +18,18 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.zephyrmobile"
+      "package": "com.supercoolcoder88.zephyrmobile"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-sqlite"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "5d77e956-18ba-467f-a315-b3b340e9f25b"
+      }
+    }
   }
 }
