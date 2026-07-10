@@ -3,6 +3,7 @@ import { Tabs } from "expo-router";
 export default function TabsLayout() {
   return (
     <Tabs
+      initialRouteName="habit"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: "#111827",
@@ -14,21 +15,27 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen
-        name="index"
-        options={{
-          title: "Home",
-        }}
-      />
-      <Tabs.Screen
         name="habit"
         options={{
-          title: "Habit",
+          title: "Habits",
         }}
       />
       <Tabs.Screen
         name="task"
         options={{
-          title: "Task",
+          title: "Tasks",
+        }}
+      />
+      <Tabs.Screen
+        name="tracker"
+        options={{
+          title: "Trackers",
+        }}
+      />
+      <Tabs.Screen
+        name="daily-review"
+        options={{
+          title: "Review",
         }}
       />
     </Tabs>

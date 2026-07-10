@@ -13,11 +13,10 @@ const headerOptions = {
   },
 };
 
-export default function TaskLayout() {
+export default function TrackerLayout() {
   return (
     <Stack screenOptions={headerOptions}>
-      <Stack.Screen name="index" options={{ title: "Tasks" }} />
-      <Stack.Screen name="create" options={{ title: "New task" }} />
+      <Stack.Screen name="index" options={{ title: "Trackers" }} />
     </Stack>
   );
 }

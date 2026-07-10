@@ -9,6 +9,11 @@ import { createTask, type CreateTaskInput } from "../../../db/task";
 
 const createTaskInputSchema = z.object({
   title: z.string().trim().min(1, "Title is required"),
+  description: z
+    .string()
+    .trim()
+    .transform((description) => (description.length > 0 ? description : null))
+    .optional(),
   deadline: z
     .string()
     .trim()
@@ -21,6 +26,7 @@ export default function CreateTaskScreen() {
   const queryClient = useQueryClient();
   const [input, setInput] = useState<CreateTaskInput>({
     title: "",
+    description: "",
     deadline: "",
   });
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +66,18 @@ export default function CreateTaskScreen() {
         placeholder="Task title"
         placeholderTextColor="#9ca3af"
         value={input.title}
+      />
+
+      <TextInput
+        className="min-h-24 rounded border border-gray-200 bg-white px-3 py-3 text-gray-950"
+        multiline
+        onChangeText={(description) =>
+          setInput((current) => ({ ...current, description }))
+        }
+        placeholder="Description"
+        placeholderTextColor="#9ca3af"
+        textAlignVertical="top"
+        value={input.description ?? ""}
       />
 
       <TextInput

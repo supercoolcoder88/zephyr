@@ -1,5 +1,7 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
+import { refreshAllDailyReviews } from "./dailyReview";
+
 export type Habit = {
   id: number;
   title: string;
@@ -26,6 +28,7 @@ export async function createHabit(
     input.title,
     input.score,
   );
+  await refreshAllDailyReviews(database);
 
   return {
     id: result.lastInsertRowId,
@@ -99,6 +102,7 @@ export async function updateHabit(
       `UPDATE habit SET ${updates.join(", ")} WHERE id = ?`,
       [...params, id],
     );
+    await refreshAllDailyReviews(database);
   }
 
   return getHabit(database, id);
@@ -109,4 +113,5 @@ export async function deleteHabit(
   id: number,
 ): Promise<void> {
   await database.runAsync("DELETE FROM habit WHERE id = ?", id);
+  await refreshAllDailyReviews(database);
 }

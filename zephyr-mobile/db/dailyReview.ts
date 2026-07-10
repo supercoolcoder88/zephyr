@@ -3,84 +3,100 @@ import type { SQLiteDatabase } from "expo-sqlite";
 export type DailyReview = {
   id: number;
   date: string;
-  sleepScore: number;
-  energyScore: number;
-  dayScore: number;
-  screenTime: number;
+  habitsCompleted: number;
+  habitsIncomplete: number;
+  habitsScore: number;
+  tasksCompleted: number;
+  tasksIncomplete: number;
 };
-
-export type CreateDailyReviewInput = {
-  date: string;
-  sleepScore?: number;
-  energyScore?: number;
-  dayScore?: number;
-  screenTime?: number;
-};
-
-export type UpdateDailyReviewInput = Partial<Omit<DailyReview, "id">>;
 
 type DailyReviewRow = {
   id: number;
   date: string;
-  sleepScore: number;
-  energyScore: number;
-  dayScore: number;
-  screenTime: number;
+  habitsCompleted: number;
+  habitsIncomplete: number;
+  habitsScore: number;
+  tasksCompleted: number;
+  tasksIncomplete: number;
 };
 
-export async function createDailyReview(
-  database: SQLiteDatabase,
-  input: CreateDailyReviewInput,
-): Promise<DailyReview> {
-  const review = {
-    date: input.date,
-    sleepScore: input.sleepScore ?? 0,
-    energyScore: input.energyScore ?? 0,
-    dayScore: input.dayScore ?? 0,
-    screenTime: input.screenTime ?? 0,
-  };
+type DailyReviewCounts = Omit<DailyReview, "id" | "date">;
 
-  const result = await database.runAsync(
+export async function getOrCreateDailyReviewByDate(
+  database: SQLiteDatabase,
+  date: string,
+): Promise<DailyReview> {
+  await database.runAsync(
+    `
+      INSERT INTO daily_review (date)
+      VALUES (?)
+      ON CONFLICT(date) DO NOTHING
+    `,
+    date,
+  );
+
+  return refreshDailyReview(database, date);
+}
+
+export async function refreshDailyReview(
+  database: SQLiteDatabase,
+  date: string,
+): Promise<DailyReview> {
+  const counts = await getDailyReviewCounts(database, date);
+
+  await database.runAsync(
     `
       INSERT INTO daily_review (
         date,
-        sleep_score,
-        energy_score,
-        day_score,
-        screen_time
+        habits_completed,
+        habits_incomplete,
+        habits_score,
+        tasks_completed,
+        tasks_incomplete
       )
-      VALUES (?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(date) DO UPDATE SET
+        habits_completed = excluded.habits_completed,
+        habits_incomplete = excluded.habits_incomplete,
+        habits_score = excluded.habits_score,
+        tasks_completed = excluded.tasks_completed,
+        tasks_incomplete = excluded.tasks_incomplete
     `,
-    review.date,
-    review.sleepScore,
-    review.energyScore,
-    review.dayScore,
-    review.screenTime,
+    date,
+    counts.habitsCompleted,
+    counts.habitsIncomplete,
+    counts.habitsScore,
+    counts.tasksCompleted,
+    counts.tasksIncomplete,
   );
 
-  return {
-    id: result.lastInsertRowId,
-    ...review,
-  };
+  const review = await getDailyReviewByDate(database, date);
+
+  if (!review) {
+    throw new Error("Unable to create daily review.");
+  }
+
+  return review;
 }
 
-export function getDailyReview(
+export function getDailyReviewByDate(
   database: SQLiteDatabase,
-  id: number,
+  date: string,
 ): Promise<DailyReview | null> {
   return database.getFirstAsync<DailyReviewRow>(
     `
       SELECT
         id,
         date,
-        sleep_score AS sleepScore,
-        energy_score AS energyScore,
-        day_score AS dayScore,
-        screen_time AS screenTime
+        habits_completed AS habitsCompleted,
+        habits_incomplete AS habitsIncomplete,
+        habits_score AS habitsScore,
+        tasks_completed AS tasksCompleted,
+        tasks_incomplete AS tasksIncomplete
       FROM daily_review
-      WHERE id = ?
+      WHERE date = ?
     `,
-    id,
+    date,
   );
 }
 
@@ -91,56 +107,24 @@ export function getAllDailyReviews(
     SELECT
       id,
       date,
-      sleep_score AS sleepScore,
-      energy_score AS energyScore,
-      day_score AS dayScore,
-      screen_time AS screenTime
+      habits_completed AS habitsCompleted,
+      habits_incomplete AS habitsIncomplete,
+      habits_score AS habitsScore,
+      tasks_completed AS tasksCompleted,
+      tasks_incomplete AS tasksIncomplete
     FROM daily_review
     ORDER BY date
   `);
 }
 
-export async function updateDailyReview(
+export async function refreshAllDailyReviews(
   database: SQLiteDatabase,
-  id: number,
-  input: UpdateDailyReviewInput,
-): Promise<DailyReview | null> {
-  const updates: string[] = [];
-  const params: Array<string | number> = [];
+): Promise<void> {
+  const reviews = await getAllDailyReviews(database);
 
-  if (input.date !== undefined) {
-    updates.push("date = ?");
-    params.push(input.date);
-  }
-
-  if (input.sleepScore !== undefined) {
-    updates.push("sleep_score = ?");
-    params.push(input.sleepScore);
-  }
-
-  if (input.energyScore !== undefined) {
-    updates.push("energy_score = ?");
-    params.push(input.energyScore);
-  }
-
-  if (input.dayScore !== undefined) {
-    updates.push("day_score = ?");
-    params.push(input.dayScore);
-  }
-
-  if (input.screenTime !== undefined) {
-    updates.push("screen_time = ?");
-    params.push(input.screenTime);
-  }
-
-  if (updates.length > 0) {
-    await database.runAsync(
-      `UPDATE daily_review SET ${updates.join(", ")} WHERE id = ?`,
-      [...params, id],
-    );
-  }
-
-  return getDailyReview(database, id);
+  await Promise.all(
+    reviews.map((review) => refreshDailyReview(database, review.date)),
+  );
 }
 
 export async function deleteDailyReview(
@@ -148,4 +132,53 @@ export async function deleteDailyReview(
   id: number,
 ): Promise<void> {
   await database.runAsync("DELETE FROM daily_review WHERE id = ?", id);
+}
+
+async function getDailyReviewCounts(
+  database: SQLiteDatabase,
+  date: string,
+): Promise<DailyReviewCounts> {
+  const habitCounts = await database.getFirstAsync<{
+    completed: number;
+    total: number;
+    score: number | null;
+  }>(
+    `
+      SELECT
+        COUNT(habit.id) AS total,
+        COUNT(CASE WHEN habit_log.status = 'COMPLETE' THEN 1 END) AS completed,
+        SUM(CASE WHEN habit_log.status = 'COMPLETE' THEN habit.score ELSE 0 END) AS score
+      FROM habit
+      LEFT JOIN habit_log
+        ON habit_log.habit_id = habit.id
+        AND habit_log.date = ?
+    `,
+    date,
+  );
+  const taskCounts = await database.getFirstAsync<{
+    completed: number;
+    total: number;
+  }>(
+    `
+      SELECT
+        COUNT(task.id) AS total,
+        COUNT(CASE WHEN task_log.status = 'COMPLETE' THEN 1 END) AS completed
+      FROM task
+      LEFT JOIN task_log
+        ON task_log.task_id = task.id
+        AND task_log.date = ?
+    `,
+    date,
+  );
+
+  const habitsCompleted = habitCounts?.completed ?? 0;
+  const tasksCompleted = taskCounts?.completed ?? 0;
+
+  return {
+    habitsCompleted,
+    habitsIncomplete: (habitCounts?.total ?? 0) - habitsCompleted,
+    habitsScore: habitCounts?.score ?? 0,
+    tasksCompleted,
+    tasksIncomplete: (taskCounts?.total ?? 0) - tasksCompleted,
+  };
 }

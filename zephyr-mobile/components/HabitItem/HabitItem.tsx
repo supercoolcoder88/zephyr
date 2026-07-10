@@ -2,6 +2,7 @@ import { Pressable, Text, View } from "react-native";
 
 export type HabitItemProps = {
   completed: boolean;
+  onPress: () => void;
   onToggle: () => void;
   title: string;
   score: number;
@@ -9,15 +10,17 @@ export type HabitItemProps = {
 
 export default function HabitItem({
   completed,
+  onPress,
   onToggle,
   title,
   score,
 }: HabitItemProps) {
   return (
-    <View
+    <Pressable
       className={`mb-4 flex-row items-center rounded border px-4 py-4 shadow-sm ${
         completed ? "border-gray-100 bg-gray-100" : "border-gray-200 bg-white"
       }`}
+      onPress={onPress}
     >
       <View className="flex-1 flex-row items-center">
         <Text
@@ -44,6 +47,6 @@ export default function HabitItem({
       >
         {completed ? <View className="h-3 w-3 rounded bg-white" /> : null}
       </Pressable>
-    </View>
+    </Pressable>
   );
 }
