@@ -9,11 +9,6 @@ import { createHabit, type CreateHabitInput } from "../../../db/habit";
 
 const createHabitInputSchema = z.object({
   title: z.string().trim().min(1, "Title is required"),
-  score: z
-    .number()
-    .int()
-    .min(1, "1 <= score <= 10")
-    .max(10, "1 <= score <= 10"),
 });
 
 export default function CreateHabitScreen() {
@@ -21,7 +16,6 @@ export default function CreateHabitScreen() {
   const queryClient = useQueryClient();
   const [input, setInput] = useState<CreateHabitInput>({
     title: "",
-    score: 1,
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -57,36 +51,20 @@ export default function CreateHabitScreen() {
   }
 
   return (
-    <View className="flex-1 gap-4 bg-gray-50 p-5 pt-8">
+    <View className="flex-1 gap-4 bg-white p-5 pt-8">
       <TextInput
         autoFocus
-        className="rounded border border-gray-200 bg-white px-3 py-3 text-gray-950"
+        className="rounded bg-neutral-100 px-3 py-3 text-black"
         onChangeText={(title) => setInput((current) => ({ ...current, title }))}
         placeholder="Habit title"
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor="#a3a3a3"
         value={input.title}
       />
 
-      <TextInput
-        className="rounded border border-gray-200 bg-white px-3 py-3 text-gray-950"
-        keyboardType="number-pad"
-        onChangeText={(score) => {
-          const nextScore = Number(score);
-
-          setInput((current) => ({
-            ...current,
-            score: Number.isNaN(nextScore) ? 1 : nextScore,
-          }));
-        }}
-        placeholder="Score, 1 to 10"
-        placeholderTextColor="#9ca3af"
-        value={String(input.score)}
-      />
-
-      {error ? <Text className="text-gray-500">{error}</Text> : null}
+      {error ? <Text className="text-neutral-500">{error}</Text> : null}
 
       <Pressable
-        className="rounded bg-blue-950 px-4 py-3"
+        className="rounded bg-black px-4 py-3"
         disabled={createQuery.isPending}
         onPress={handleSubmit}
       >

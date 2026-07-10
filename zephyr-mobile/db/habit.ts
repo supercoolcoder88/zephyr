@@ -5,7 +5,6 @@ import { refreshAllDailyReviews } from "./dailyReview";
 export type Habit = {
   id: number;
   title: string;
-  score: number;
 };
 
 export type HabitWithCompletion = Habit & {
@@ -14,7 +13,6 @@ export type HabitWithCompletion = Habit & {
 
 export type CreateHabitInput = {
   title: string;
-  score: number;
 };
 
 export type UpdateHabitInput = Partial<Omit<Habit, "id">>;
@@ -24,16 +22,14 @@ export async function createHabit(
   input: CreateHabitInput,
 ): Promise<Habit> {
   const result = await database.runAsync(
-    "INSERT INTO habit (title, score) VALUES (?, ?)",
+    "INSERT INTO habit (title) VALUES (?)",
     input.title,
-    input.score,
   );
   await refreshAllDailyReviews(database);
 
   return {
     id: result.lastInsertRowId,
     title: input.title,
-    score: input.score,
   };
 }
 
@@ -42,14 +38,14 @@ export function getHabit(
   id: number,
 ): Promise<Habit | null> {
   return database.getFirstAsync<Habit>(
-    "SELECT id, title, score FROM habit WHERE id = ?",
+    "SELECT id, title FROM habit WHERE id = ?",
     id,
   );
 }
 
 export function getAllHabits(database: SQLiteDatabase): Promise<Habit[]> {
   return database.getAllAsync<Habit>(
-    "SELECT id, title, score FROM habit ORDER BY id",
+    "SELECT id, title FROM habit ORDER BY id",
   );
 }
 
@@ -62,7 +58,6 @@ export function getHabitsWithCompletion(
       SELECT
         habit.id,
         habit.title,
-        habit.score,
         COALESCE(habit_log.status, 'INCOMPLETE') AS status
       FROM habit
       LEFT JOIN habit_log
@@ -85,16 +80,11 @@ export async function updateHabit(
   input: UpdateHabitInput,
 ): Promise<Habit | null> {
   const updates: string[] = [];
-  const params: Array<string | number> = [];
+  const params: string[] = [];
 
   if (input.title !== undefined) {
     updates.push("title = ?");
     params.push(input.title);
-  }
-
-  if (input.score !== undefined) {
-    updates.push("score = ?");
-    params.push(input.score);
   }
 
   if (updates.length > 0) {

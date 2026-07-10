@@ -5,6 +5,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { z } from "zod";
 
 import HabitItem from "../../../components/HabitItem/HabitItem";
+import FloatingAddButton from "../../../components/FloatingAddButton";
 import ItemDrawer from "../../../components/ItemDrawer";
 import {
   createHabit,
@@ -16,22 +17,15 @@ import {
   type UpdateHabitInput,
 } from "../../../db/habit";
 import { updateHabitLogStatus } from "../../../db/habitLog";
+import { getDisableEdits, getHideHabitAddButton } from "../../../db/settings";
 import { getLocalDateKey } from "../../../utils/date";
 
 const habitInputSchema = z.object({
   title: z.string().trim().min(1, "Title is required"),
-  score: z
-    .string()
-    .trim()
-    .transform((score) => Number(score))
-    .refine((score) => Number.isInteger(score) && score >= 1 && score <= 10, {
-      message: "1 <= score <= 10",
-    }),
 });
 
 type HabitInput = {
   title: string;
-  score: string;
 };
 
 type HabitDrawerState =
@@ -55,7 +49,7 @@ export default function HabitScreen() {
   const titleInputRef = useRef<TextInput>(null);
 
   function openCreateDrawer() {
-    setDrawer({ mode: "create", input: { title: "", score: "1" } });
+    setDrawer({ mode: "create", input: { title: "" } });
     setError(null);
   }
 
@@ -63,7 +57,7 @@ export default function HabitScreen() {
     setDrawer({
       mode: "update",
       id: habit.id,
-      input: { title: habit.title, score: String(habit.score) },
+      input: { title: habit.title },
     });
     setError(null);
   }
@@ -71,6 +65,14 @@ export default function HabitScreen() {
   const habitsQuery = useQuery({
     queryKey: ["getHabitsWithCompletion", today],
     queryFn: () => getHabitsWithCompletion(database, today),
+  });
+  const hideAddButtonQuery = useQuery({
+    queryKey: ["hideHabitAddButton"],
+    queryFn: () => getHideHabitAddButton(database),
+  });
+  const disableEditsQuery = useQuery({
+    queryKey: ["disableEdits"],
+    queryFn: () => getDisableEdits(database),
   });
 
   const toggleHabitMutation = useMutation({
@@ -171,20 +173,20 @@ export default function HabitScreen() {
   const completedHabits = habits.filter((habit) => habit.status === "COMPLETE");
 
   return (
-    <View className="flex-1 bg-gray-50">
+    <View className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerClassName="px-5 pb-28 pt-4"
       >
         {habitsQuery.isLoading ? (
-          <Text className="text-gray-400">Loading habits...</Text>
+          <Text className="text-neutral-400">Loading habits...</Text>
         ) : null}
         {habitsQuery.isError ? (
-          <Text className="text-gray-500">Unable to load habits.</Text>
+          <Text className="text-neutral-500">Unable to load habits.</Text>
         ) : null}
         {!habitsQuery.isLoading && habits.length === 0 ? (
-          <View className="rounded border border-gray-100 bg-white px-4 py-8">
-            <Text className="text-center font-semibold text-gray-950">
+          <View className="bg-white py-8">
+            <Text className="text-center font-semibold text-black">
               No habits yet
             </Text>
           </View>
@@ -194,23 +196,24 @@ export default function HabitScreen() {
           <HabitItem
             key={habit.id}
             completed={false}
-            onPress={() => openUpdateDrawer(habit)}
+            onPress={
+              disableEditsQuery.data ? undefined : () => openUpdateDrawer(habit)
+            }
             onToggle={() => toggleHabitMutation.mutate(habit.id)}
-            score={habit.score}
             title={habit.title}
           />
         ))}
 
         {completedHabits.length > 0 ? (
-          <View className="mt-2">
+          <View className="-mt-px">
             <Pressable
-              className="mb-3 flex-row items-center justify-between rounded border border-gray-200 bg-white px-4 py-3"
+              className="-mx-5 flex-row items-center justify-between bg-neutral-100 px-5 py-3"
               onPress={() => setShowCompleted((current) => !current)}
             >
-              <Text className="font-semibold text-gray-950">
+              <Text className="font-semibold text-neutral-500">
                 Completed ({completedHabits.length})
               </Text>
-              <Text className="text-lg font-semibold text-gray-400">
+              <Text className="text-lg font-semibold text-neutral-400">
                 {showCompleted ? "-" : "+"}
               </Text>
             </Pressable>
@@ -219,9 +222,12 @@ export default function HabitScreen() {
                   <HabitItem
                     key={habit.id}
                     completed
-                    onPress={() => openUpdateDrawer(habit)}
+                    onPress={
+                      disableEditsQuery.data
+                        ? undefined
+                        : () => openUpdateDrawer(habit)
+                    }
                     onToggle={() => toggleHabitMutation.mutate(habit.id)}
-                    score={habit.score}
                     title={habit.title}
                   />
                 ))
@@ -230,17 +236,17 @@ export default function HabitScreen() {
         ) : null}
       </ScrollView>
 
-      <Pressable
-        accessibilityLabel="Create new habit"
-        className="absolute bottom-6 right-5 h-14 w-14 items-center justify-center rounded-full bg-blue-950 shadow-lg"
-        onPress={openCreateDrawer}
-      >
-        <Text className="text-3xl font-light leading-8 text-white">+</Text>
-      </Pressable>
+      {hideAddButtonQuery.data === false ? (
+        <FloatingAddButton
+          accessibilityLabel="Create new habit"
+          onPress={openCreateDrawer}
+        />
+      ) : null}
 
       <ItemDrawer
         deletePending={deleteHabitMutation.isPending}
         error={error}
+        focusOnOpen={drawer?.mode === "create"}
         onClose={() => {
           setDrawer(null);
           setError(null);
@@ -260,9 +266,14 @@ export default function HabitScreen() {
         visible={drawer !== null}
       >
         <TextInput
-          autoFocus
+          autoFocus={drawer?.mode === "create"}
+          key={
+            drawer?.mode === "update"
+              ? `update-${drawer.id}`
+              : (drawer?.mode ?? "closed")
+          }
           ref={titleInputRef}
-          className="rounded border border-gray-200 bg-gray-50 px-3 py-3 text-gray-950"
+          className="rounded bg-neutral-100 px-3 py-3 text-black"
           onChangeText={(title) =>
             setDrawer((current) =>
               current
@@ -271,22 +282,8 @@ export default function HabitScreen() {
             )
           }
           placeholder="Habit title"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor="#a3a3a3"
           value={drawer?.input.title ?? ""}
-        />
-        <TextInput
-          className="rounded border border-gray-200 bg-gray-50 px-3 py-3 text-gray-950"
-          keyboardType="number-pad"
-          onChangeText={(score) =>
-            setDrawer((current) =>
-              current
-                ? { ...current, input: { ...current.input, score } }
-                : current,
-            )
-          }
-          placeholder="Score, 1 to 10"
-          placeholderTextColor="#9ca3af"
-          value={drawer?.input.score ?? ""}
         />
       </ItemDrawer>
     </View>

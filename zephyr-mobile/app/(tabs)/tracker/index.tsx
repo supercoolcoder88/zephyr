@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { z } from "zod";
 
+import FloatingAddButton from "../../../components/FloatingAddButton";
 import ItemDrawer from "../../../components/ItemDrawer";
+import { getDisableEdits, getHideTrackerAddButton } from "../../../db/settings";
 import {
   createTracker,
   deleteTracker,
@@ -55,6 +57,14 @@ export default function TrackersScreen() {
   const trackersQuery = useQuery({
     queryKey: ["getTrackersWithLog", today],
     queryFn: () => getTrackersWithLog(database, today),
+  });
+  const hideAddButtonQuery = useQuery({
+    queryKey: ["hideTrackerAddButton"],
+    queryFn: () => getHideTrackerAddButton(database),
+  });
+  const disableEditsQuery = useQuery({
+    queryKey: ["disableEdits"],
+    queryFn: () => getDisableEdits(database),
   });
 
   useEffect(() => {
@@ -114,6 +124,10 @@ export default function TrackersScreen() {
         queryClient.invalidateQueries({
           queryKey: ["getOrCreateDailyReviewByDate", today],
         }),
+        queryClient.invalidateQueries({
+          queryKey: ["getAllTrackerLogsWithTrackers"],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["getAllDailyReviews"] }),
       ]);
     },
   });
@@ -172,20 +186,20 @@ export default function TrackersScreen() {
   const trackers = trackersQuery.data ?? [];
 
   return (
-    <View className="flex-1 bg-gray-50">
+    <View className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerClassName="px-5 pb-28 pt-4"
       >
         {trackersQuery.isLoading ? (
-          <Text className="text-gray-400">Loading trackers...</Text>
+          <Text className="text-neutral-400">Loading trackers...</Text>
         ) : null}
         {trackersQuery.isError ? (
-          <Text className="text-gray-500">Unable to load trackers.</Text>
+          <Text className="text-neutral-500">Unable to load trackers.</Text>
         ) : null}
         {!trackersQuery.isLoading && trackers.length === 0 ? (
-          <View className="rounded border border-gray-100 bg-white px-4 py-8">
-            <Text className="text-center font-semibold text-gray-950">
+          <View className="bg-white py-8">
+            <Text className="text-center font-semibold text-black">
               No trackers yet
             </Text>
           </View>
@@ -194,39 +208,43 @@ export default function TrackersScreen() {
         {trackers.map((tracker) => (
           <View
             key={tracker.id}
-            className="mb-3 flex-row items-center gap-3 rounded border border-gray-200 bg-white px-4 py-3 shadow-sm"
+            className="flex-row items-center gap-3 border-b border-neutral-100 bg-white py-2"
           >
             <Pressable
               className="flex-1 py-2"
-              onPress={() => openUpdateDrawer(tracker)}
+              onPress={
+                disableEditsQuery.data
+                  ? undefined
+                  : () => openUpdateDrawer(tracker)
+              }
             >
-              <Text className="text-base font-semibold text-gray-950">
+              <Text className="text-base font-semibold text-black">
                 {tracker.name}
               </Text>
             </Pressable>
             <TextInput
-              className="w-24 rounded border border-gray-200 bg-gray-50 px-3 py-3 text-center text-gray-950"
+              className="w-24 rounded bg-neutral-100 px-2 py-2 text-center text-black"
               keyboardType="number-pad"
               onChangeText={(value) => updateCount(tracker.id, value)}
               placeholder="0"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor="#a3a3a3"
               value={counts[tracker.id] ?? ""}
             />
           </View>
         ))}
       </ScrollView>
 
-      <Pressable
-        accessibilityLabel="Create new tracker"
-        className="absolute bottom-6 right-5 h-14 w-14 items-center justify-center rounded-full bg-blue-950 shadow-lg"
-        onPress={openCreateDrawer}
-      >
-        <Text className="text-3xl font-light leading-8 text-white">+</Text>
-      </Pressable>
+      {hideAddButtonQuery.data === false ? (
+        <FloatingAddButton
+          accessibilityLabel="Create new tracker"
+          onPress={openCreateDrawer}
+        />
+      ) : null}
 
       <ItemDrawer
         deletePending={deleteTrackerMutation.isPending}
         error={error}
+        focusOnOpen={drawer?.mode === "create"}
         initialFocusRef={nameInputRef}
         onClose={() => {
           setDrawer(null);
@@ -248,9 +266,9 @@ export default function TrackersScreen() {
         visible={drawer !== null}
       >
         <TextInput
-          autoFocus
+          autoFocus={drawer?.mode === "create"}
           ref={nameInputRef}
-          className="rounded border border-gray-200 bg-gray-50 px-3 py-3 text-gray-950"
+          className="rounded bg-neutral-100 px-3 py-3 text-black"
           onChangeText={(name) =>
             setDrawer((current) =>
               current
@@ -259,7 +277,7 @@ export default function TrackersScreen() {
             )
           }
           placeholder="Tracker name"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor="#a3a3a3"
           value={drawer?.input.name ?? ""}
         />
       </ItemDrawer>

@@ -13,6 +13,14 @@ export type TrackerWithLog = Tracker & {
   dailyReviewId: number | null;
 };
 
+export type TrackerLogWithTracker = {
+  trackerId: number;
+  name: string;
+  count: number;
+  date: string;
+  dailyReviewId: number;
+};
+
 export type CreateTrackerInput = {
   name: string;
 };
@@ -20,6 +28,7 @@ export type CreateTrackerInput = {
 export type UpdateTrackerInput = Partial<Omit<Tracker, "id">>;
 
 type TrackerWithLogRow = TrackerWithLog;
+type TrackerLogWithTrackerRow = TrackerLogWithTracker;
 
 export async function createTracker(
   database: SQLiteDatabase,
@@ -72,6 +81,22 @@ export function getTrackersWithLog(
     `,
     date,
   );
+}
+
+export function getAllTrackerLogsWithTrackers(
+  database: SQLiteDatabase,
+): Promise<TrackerLogWithTracker[]> {
+  return database.getAllAsync<TrackerLogWithTrackerRow>(`
+    SELECT
+      tracker_log.tracker_id AS trackerId,
+      tracker.name,
+      tracker_log.count,
+      tracker_log.date,
+      tracker_log.daily_review_id AS dailyReviewId
+    FROM tracker_log
+    JOIN tracker ON tracker.id = tracker_log.tracker_id
+    ORDER BY tracker_log.date DESC, tracker.id
+  `);
 }
 
 export async function updateTracker(

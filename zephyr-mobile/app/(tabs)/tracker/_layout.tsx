@@ -2,13 +2,13 @@ import { Stack } from "expo-router";
 
 const headerOptions = {
   headerStyle: {
-    backgroundColor: "#f9fafb",
+    backgroundColor: "#ffffff",
   },
   headerShadowVisible: false,
-  headerTintColor: "#172554",
+  headerTintColor: "#000000",
   headerTitleStyle: {
-    color: "#030712",
-    fontSize: 30,
+    color: "#000000",
+    fontSize: 28,
     fontWeight: "700" as const,
   },
 };

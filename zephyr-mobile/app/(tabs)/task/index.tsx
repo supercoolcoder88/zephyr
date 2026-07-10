@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { z } from "zod";
 
+import FloatingAddButton from "../../../components/FloatingAddButton";
 import ItemDrawer from "../../../components/ItemDrawer";
 import {
   createTask,
@@ -63,33 +64,17 @@ type TaskItemProps = {
 function TaskItem({ completed, onPress, onToggle, task }: TaskItemProps) {
   return (
     <Pressable
-      className={`mb-3 rounded border px-4 py-4 shadow-sm ${
-        completed ? "border-gray-100 bg-gray-100" : "border-gray-200 bg-white"
-      }`}
+      className="border-b border-neutral-100 bg-white py-3"
       onPress={onPress}
     >
-      <View className="flex-row items-start gap-3">
-        <View className="flex-1">
-          <Text
-            className={`text-base font-semibold ${
-              completed ? "text-gray-400" : "text-gray-950"
-            }`}
-          >
-            {task.title}
-          </Text>
-          {task.description ? (
-            <Text className="mt-1 text-sm leading-5 text-gray-500">
-              {task.description}
-            </Text>
-          ) : null}
-          {task.deadline ? (
-            <View className="mt-3 self-start rounded bg-blue-50 px-2 py-1">
-              <Text className="text-xs font-semibold text-blue-950">
-                {task.deadline}
-              </Text>
-            </View>
-          ) : null}
-        </View>
+      <View className="flex-row items-center gap-3">
+        <Text
+          className={`flex-1 text-base font-semibold ${
+            completed ? "text-neutral-400" : "text-black"
+          }`}
+        >
+          {task.title}
+        </Text>
 
         <Pressable
           accessibilityLabel={
@@ -100,7 +85,7 @@ function TaskItem({ completed, onPress, onToggle, task }: TaskItemProps) {
           accessibilityRole="checkbox"
           accessibilityState={{ checked: completed }}
           className={`h-7 w-7 items-center justify-center rounded border-2 ${
-            completed ? "border-blue-950 bg-blue-950" : "border-gray-300"
+            completed ? "border-black bg-black" : "border-neutral-300"
           }`}
           onPress={onToggle}
         >
@@ -234,20 +219,20 @@ export default function TaskScreen() {
   const completedTasks = tasks.filter((task) => task.status === "COMPLETE");
 
   return (
-    <View className="flex-1 bg-gray-50">
+    <View className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerClassName="px-5 pb-28 pt-4"
       >
         {tasksQuery.isLoading ? (
-          <Text className="text-gray-400">Loading tasks...</Text>
+          <Text className="text-neutral-400">Loading tasks...</Text>
         ) : null}
         {tasksQuery.isError ? (
-          <Text className="text-gray-500">Unable to load tasks.</Text>
+          <Text className="text-neutral-500">Unable to load tasks.</Text>
         ) : null}
         {!tasksQuery.isLoading && tasks.length === 0 ? (
-          <View className="rounded border border-gray-100 bg-white px-4 py-8">
-            <Text className="text-center font-semibold text-gray-950">
+          <View className="bg-white py-8">
+            <Text className="text-center font-semibold text-black">
               No tasks yet
             </Text>
           </View>
@@ -264,15 +249,15 @@ export default function TaskScreen() {
         ))}
 
         {completedTasks.length > 0 ? (
-          <View className="mt-2">
+          <View className="-mt-px">
             <Pressable
-              className="mb-3 flex-row items-center justify-between rounded border border-gray-200 bg-white px-4 py-3"
+              className="-mx-5 flex-row items-center justify-between bg-neutral-100 px-5 py-3"
               onPress={() => setShowCompleted((current) => !current)}
             >
-              <Text className="font-semibold text-gray-950">
+              <Text className="font-semibold text-neutral-500">
                 Completed ({completedTasks.length})
               </Text>
-              <Text className="text-lg font-semibold text-gray-400">
+              <Text className="text-lg font-semibold text-neutral-400">
                 {showCompleted ? "-" : "+"}
               </Text>
             </Pressable>
@@ -291,17 +276,15 @@ export default function TaskScreen() {
         ) : null}
       </ScrollView>
 
-      <Pressable
+      <FloatingAddButton
         accessibilityLabel="Create new task"
-        className="absolute bottom-6 right-5 h-14 w-14 items-center justify-center rounded-full bg-blue-950 shadow-lg"
         onPress={openCreateDrawer}
-      >
-        <Text className="text-3xl font-light leading-8 text-white">+</Text>
-      </Pressable>
+      />
 
       <ItemDrawer
         deletePending={deleteTaskMutation.isPending}
         error={error}
+        focusOnOpen={drawer?.mode === "create"}
         onClose={() => {
           setDrawer(null);
           setError(null);
@@ -321,9 +304,9 @@ export default function TaskScreen() {
         visible={drawer !== null}
       >
         <TextInput
-          autoFocus
+          autoFocus={drawer?.mode === "create"}
           ref={titleInputRef}
-          className="rounded border border-gray-200 bg-gray-50 px-3 py-3 text-gray-950"
+          className="rounded bg-neutral-100 px-3 py-3 text-black"
           onChangeText={(title) =>
             setDrawer((current) =>
               current
@@ -332,11 +315,11 @@ export default function TaskScreen() {
             )
           }
           placeholder="Task title"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor="#a3a3a3"
           value={drawer?.input.title ?? ""}
         />
         <TextInput
-          className="min-h-24 rounded border border-gray-200 bg-gray-50 px-3 py-3 text-gray-950"
+          className="min-h-24 rounded bg-neutral-100 px-3 py-3 text-black"
           multiline
           onChangeText={(description) =>
             setDrawer((current) =>
@@ -346,12 +329,12 @@ export default function TaskScreen() {
             )
           }
           placeholder="Description"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor="#a3a3a3"
           textAlignVertical="top"
           value={drawer?.input.description ?? ""}
         />
         <TextInput
-          className="rounded border border-gray-200 bg-gray-50 px-3 py-3 text-gray-950"
+          className="rounded bg-neutral-100 px-3 py-3 text-black"
           onChangeText={(deadline) =>
             setDrawer((current) =>
               current
@@ -360,7 +343,7 @@ export default function TaskScreen() {
             )
           }
           placeholder="Deadline"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor="#a3a3a3"
           value={drawer?.input.deadline ?? ""}
         />
       </ItemDrawer>

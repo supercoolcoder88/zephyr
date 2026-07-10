@@ -2,10 +2,9 @@ import { Pressable, Text, View } from "react-native";
 
 export type HabitItemProps = {
   completed: boolean;
-  onPress: () => void;
+  onPress?: () => void;
   onToggle: () => void;
   title: string;
-  score: number;
 };
 
 export default function HabitItem({
@@ -13,25 +12,19 @@ export default function HabitItem({
   onPress,
   onToggle,
   title,
-  score,
 }: HabitItemProps) {
   return (
     <Pressable
-      className={`mb-4 flex-row items-center rounded border px-4 py-4 shadow-sm ${
-        completed ? "border-gray-100 bg-gray-100" : "border-gray-200 bg-white"
-      }`}
+      className="flex-row items-center border-b border-neutral-100 bg-white py-3"
       onPress={onPress}
     >
       <View className="flex-1 flex-row items-center">
         <Text
           className={`text-base font-semibold ${
-            completed ? "text-gray-400" : "text-gray-950"
+            completed ? "text-neutral-400" : "text-black"
           }`}
         >
           {title}
-        </Text>
-        <Text className="ml-2 text-xs font-semibold text-gray-400">
-          {score}
         </Text>
       </View>
       <Pressable
@@ -41,7 +34,7 @@ export default function HabitItem({
         accessibilityRole="checkbox"
         accessibilityState={{ checked: completed }}
         className={`ml-4 h-7 w-7 items-center justify-center rounded border-2 ${
-          completed ? "border-blue-950 bg-blue-950" : "border-gray-300"
+          completed ? "border-black bg-black" : "border-neutral-300"
         }`}
         onPress={onToggle}
       >

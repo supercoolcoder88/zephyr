@@ -1,13 +1,12 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
+import { getLocalDateKey } from "../utils/date";
+
 export type DailyReview = {
   id: number;
   date: string;
   habitsCompleted: number;
   habitsIncomplete: number;
-  habitsScore: number;
-  tasksCompleted: number;
-  tasksIncomplete: number;
 };
 
 type DailyReviewRow = {
@@ -15,12 +14,37 @@ type DailyReviewRow = {
   date: string;
   habitsCompleted: number;
   habitsIncomplete: number;
-  habitsScore: number;
-  tasksCompleted: number;
-  tasksIncomplete: number;
 };
 
 type DailyReviewCounts = Omit<DailyReview, "id" | "date">;
+
+export async function rolloverDailyReview(
+  database: SQLiteDatabase,
+  now = new Date(),
+) {
+  const today = getLocalDateKey(now);
+  const latestReview = await database.getFirstAsync<{ date: string }>(`
+    SELECT date
+    FROM daily_review
+    ORDER BY date DESC
+    LIMIT 1
+  `);
+
+  if (latestReview?.date === today) {
+    return;
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  await database.withTransactionAsync(async () => {
+    if (latestReview) {
+      await refreshDailyReview(database, getLocalDateKey(yesterday));
+    }
+
+    await getOrCreateDailyReviewByDate(database, today);
+  });
+}
 
 export async function getOrCreateDailyReviewByDate(
   database: SQLiteDatabase,
@@ -49,25 +73,16 @@ export async function refreshDailyReview(
       INSERT INTO daily_review (
         date,
         habits_completed,
-        habits_incomplete,
-        habits_score,
-        tasks_completed,
-        tasks_incomplete
+        habits_incomplete
       )
-      VALUES (?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?)
       ON CONFLICT(date) DO UPDATE SET
         habits_completed = excluded.habits_completed,
-        habits_incomplete = excluded.habits_incomplete,
-        habits_score = excluded.habits_score,
-        tasks_completed = excluded.tasks_completed,
-        tasks_incomplete = excluded.tasks_incomplete
+        habits_incomplete = excluded.habits_incomplete
     `,
     date,
     counts.habitsCompleted,
     counts.habitsIncomplete,
-    counts.habitsScore,
-    counts.tasksCompleted,
-    counts.tasksIncomplete,
   );
 
   const review = await getDailyReviewByDate(database, date);
@@ -89,10 +104,7 @@ export function getDailyReviewByDate(
         id,
         date,
         habits_completed AS habitsCompleted,
-        habits_incomplete AS habitsIncomplete,
-        habits_score AS habitsScore,
-        tasks_completed AS tasksCompleted,
-        tasks_incomplete AS tasksIncomplete
+        habits_incomplete AS habitsIncomplete
       FROM daily_review
       WHERE date = ?
     `,
@@ -108,12 +120,9 @@ export function getAllDailyReviews(
       id,
       date,
       habits_completed AS habitsCompleted,
-      habits_incomplete AS habitsIncomplete,
-      habits_score AS habitsScore,
-      tasks_completed AS tasksCompleted,
-      tasks_incomplete AS tasksIncomplete
+      habits_incomplete AS habitsIncomplete
     FROM daily_review
-    ORDER BY date
+    ORDER BY date DESC
   `);
 }
 
@@ -141,13 +150,11 @@ async function getDailyReviewCounts(
   const habitCounts = await database.getFirstAsync<{
     completed: number;
     total: number;
-    score: number | null;
   }>(
     `
       SELECT
         COUNT(habit.id) AS total,
-        COUNT(CASE WHEN habit_log.status = 'COMPLETE' THEN 1 END) AS completed,
-        SUM(CASE WHEN habit_log.status = 'COMPLETE' THEN habit.score ELSE 0 END) AS score
+        COUNT(CASE WHEN habit_log.status = 'COMPLETE' THEN 1 END) AS completed
       FROM habit
       LEFT JOIN habit_log
         ON habit_log.habit_id = habit.id
@@ -155,30 +162,10 @@ async function getDailyReviewCounts(
     `,
     date,
   );
-  const taskCounts = await database.getFirstAsync<{
-    completed: number;
-    total: number;
-  }>(
-    `
-      SELECT
-        COUNT(task.id) AS total,
-        COUNT(CASE WHEN task_log.status = 'COMPLETE' THEN 1 END) AS completed
-      FROM task
-      LEFT JOIN task_log
-        ON task_log.task_id = task.id
-        AND task_log.date = ?
-    `,
-    date,
-  );
-
   const habitsCompleted = habitCounts?.completed ?? 0;
-  const tasksCompleted = taskCounts?.completed ?? 0;
 
   return {
     habitsCompleted,
     habitsIncomplete: (habitCounts?.total ?? 0) - habitsCompleted,
-    habitsScore: habitCounts?.score ?? 0,
-    tasksCompleted,
-    tasksIncomplete: (taskCounts?.total ?? 0) - tasksCompleted,
   };
 }

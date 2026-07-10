@@ -58,42 +58,42 @@ export default function CreateTaskScreen() {
   }
 
   return (
-    <View className="flex-1 gap-4 bg-gray-50 p-5 pt-8">
+    <View className="flex-1 gap-4 bg-white p-5 pt-8">
       <TextInput
         autoFocus
-        className="rounded border border-gray-200 bg-white px-3 py-3 text-gray-950"
+        className="rounded bg-neutral-100 px-3 py-3 text-black"
         onChangeText={(title) => setInput((current) => ({ ...current, title }))}
         placeholder="Task title"
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor="#a3a3a3"
         value={input.title}
       />
 
       <TextInput
-        className="min-h-24 rounded border border-gray-200 bg-white px-3 py-3 text-gray-950"
+        className="min-h-24 rounded bg-neutral-100 px-3 py-3 text-black"
         multiline
         onChangeText={(description) =>
           setInput((current) => ({ ...current, description }))
         }
         placeholder="Description"
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor="#a3a3a3"
         textAlignVertical="top"
         value={input.description ?? ""}
       />
 
       <TextInput
-        className="rounded border border-gray-200 bg-white px-3 py-3 text-gray-950"
+        className="rounded bg-neutral-100 px-3 py-3 text-black"
         onChangeText={(deadline) =>
           setInput((current) => ({ ...current, deadline }))
         }
         placeholder="Deadline"
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor="#a3a3a3"
         value={input.deadline ?? ""}
       />
 
-      {error ? <Text className="text-gray-500">{error}</Text> : null}
+      {error ? <Text className="text-neutral-500">{error}</Text> : null}
 
       <Pressable
-        className="rounded bg-blue-950 px-4 py-3"
+        className="rounded bg-black px-4 py-3"
         disabled={createQuery.isPending}
         onPress={handleSubmit}
       >
