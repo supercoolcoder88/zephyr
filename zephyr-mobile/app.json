@@ -33,7 +33,10 @@
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "expo-asset",
+      "expo-router",
+      "expo-status-bar"
     ],
     "extra": {
       "eas": {
