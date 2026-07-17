@@ -1,10 +1,10 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Stack } from 'expo-router';
-import { SQLiteProvider } from 'expo-sqlite';
-import { StatusBar } from 'expo-status-bar';
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Stack } from "expo-router";
+import { SQLiteProvider } from "expo-sqlite";
+import { StatusBar } from "expo-status-bar";
 
-import '../global.css';
-import { DATABASE_NAME, initDatabase } from '../db/init';
+import "../global.css";
+import { DATABASE_NAME, initDatabase } from "../db/init";
 
 const queryClient = new QueryClient();
 

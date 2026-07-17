@@ -11,13 +11,14 @@ const headerOptions = {
     fontSize: 28,
     fontWeight: "700" as const,
   },
+  orientation: "portrait" as const,
 };
 
 export default function TaskLayout() {
   return (
     <Stack screenOptions={headerOptions}>
       <Stack.Screen name="index" options={{ title: "Tasks" }} />
-      <Stack.Screen name="create" options={{ title: "New task" }} />
+      <Stack.Screen name="history" options={{ title: "History" }} />
     </Stack>
   );
 }

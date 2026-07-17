@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
-import { refreshAllDailyReviews } from "./dailyReview";
+import { shiftDateKey } from "../utils/date";
 
 export type Habit = {
   id: number;
@@ -9,6 +9,7 @@ export type Habit = {
 
 export type HabitWithCompletion = Habit & {
   status: "INCOMPLETE" | "COMPLETE";
+  streak: number;
 };
 
 export type CreateHabitInput = {
@@ -25,8 +26,6 @@ export async function createHabit(
     "INSERT INTO habit (title) VALUES (?)",
     input.title,
   );
-  await refreshAllDailyReviews(database);
-
   return {
     id: result.lastInsertRowId,
     title: input.title,
@@ -44,16 +43,34 @@ export function getHabit(
 }
 
 export function getAllHabits(database: SQLiteDatabase): Promise<Habit[]> {
-  return database.getAllAsync<Habit>(
-    "SELECT id, title FROM habit ORDER BY id",
-  );
+  return database.getAllAsync<Habit>("SELECT id, title FROM habit ORDER BY id");
 }
 
-export function getHabitsWithCompletion(
+type CompletedHabitLogRow = {
+  habitId: number;
+  date: string;
+};
+
+export function getHabitStreak(completedDates: string[], today: string) {
+  const dates = new Set(completedDates);
+  let currentDate = dates.has(today) ? today : shiftDateKey(today, -1);
+  let streak = 0;
+
+  while (dates.has(currentDate)) {
+    streak += 1;
+    currentDate = shiftDateKey(currentDate, -1);
+  }
+
+  return streak;
+}
+
+export async function getHabitsWithCompletion(
   database: SQLiteDatabase,
   date: string,
 ): Promise<HabitWithCompletion[]> {
-  return database.getAllAsync<HabitWithCompletion>(
+  const habits = await database.getAllAsync<
+    Omit<HabitWithCompletion, "streak">
+  >(
     `
       SELECT
         habit.id,
@@ -72,6 +89,27 @@ export function getHabitsWithCompletion(
     `,
     date,
   );
+  const completedLogs = await database.getAllAsync<CompletedHabitLogRow>(
+    `
+      SELECT habit_id AS habitId, date
+      FROM habit_log
+      WHERE status = 'COMPLETE' AND date <= ?
+      ORDER BY habit_id, date DESC
+    `,
+    date,
+  );
+  const datesByHabit = new Map<number, string[]>();
+
+  for (const log of completedLogs) {
+    const dates = datesByHabit.get(log.habitId) ?? [];
+    dates.push(log.date);
+    datesByHabit.set(log.habitId, dates);
+  }
+
+  return habits.map((habit) => ({
+    ...habit,
+    streak: getHabitStreak(datesByHabit.get(habit.id) ?? [], date),
+  }));
 }
 
 export async function updateHabit(
@@ -92,7 +130,6 @@ export async function updateHabit(
       `UPDATE habit SET ${updates.join(", ")} WHERE id = ?`,
       [...params, id],
     );
-    await refreshAllDailyReviews(database);
   }
 
   return getHabit(database, id);
@@ -103,5 +140,4 @@ export async function deleteHabit(
   id: number,
 ): Promise<void> {
   await database.runAsync("DELETE FROM habit WHERE id = ?", id);
-  await refreshAllDailyReviews(database);
 }

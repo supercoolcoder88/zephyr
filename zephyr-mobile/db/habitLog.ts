@@ -1,7 +1,5 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
-import { refreshDailyReview } from "./dailyReview";
-
 export type HabitLogStatus = "INCOMPLETE" | "COMPLETE";
 
 export type HabitLog = {
@@ -28,8 +26,6 @@ export async function createHabitLog(
     input.date,
     input.status,
   );
-  await refreshDailyReview(database, input.date);
-
   return input;
 }
 
@@ -83,8 +79,6 @@ export async function updateHabitLogStatus(
     );
   }
 
-  await refreshDailyReview(database, date);
-
   return {
     habitId,
     date,
@@ -102,5 +96,4 @@ export async function deleteHabitLog(
     habitId,
     date,
   );
-  await refreshDailyReview(database, date);
 }

@@ -18,7 +18,7 @@ import {
 } from "../../../db/habit";
 import { updateHabitLogStatus } from "../../../db/habitLog";
 import { getDisableEdits, getHideHabitAddButton } from "../../../db/settings";
-import { getLocalDateKey } from "../../../utils/date";
+import { useLocalDateKey } from "../../../hooks/useLocalDateKey";
 
 const habitInputSchema = z.object({
   title: z.string().trim().min(1, "Title is required"),
@@ -42,7 +42,7 @@ type HabitDrawerState =
 export default function HabitScreen() {
   const database = useSQLiteContext();
   const queryClient = useQueryClient();
-  const today = getLocalDateKey();
+  const today = useLocalDateKey();
   const [drawer, setDrawer] = useState<HabitDrawerState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
@@ -84,9 +84,8 @@ export default function HabitScreen() {
           queryKey: ["getHabitsWithCompletion", today],
         }),
         queryClient.invalidateQueries({
-          queryKey: ["getOrCreateDailyReviewByDate"],
+          queryKey: ["habitCompletionHistory"],
         }),
-        queryClient.invalidateQueries({ queryKey: ["getAllDailyReviews"] }),
       ]);
     },
   });
@@ -99,10 +98,6 @@ export default function HabitScreen() {
         queryClient.invalidateQueries({
           queryKey: ["getHabitsWithCompletion"],
         }),
-        queryClient.invalidateQueries({
-          queryKey: ["getOrCreateDailyReviewByDate"],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["getAllDailyReviews"] }),
       ]);
       setDrawer(null);
     },
@@ -117,10 +112,6 @@ export default function HabitScreen() {
         queryClient.invalidateQueries({
           queryKey: ["getHabitsWithCompletion"],
         }),
-        queryClient.invalidateQueries({
-          queryKey: ["getOrCreateDailyReviewByDate"],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["getAllDailyReviews"] }),
       ]);
       setDrawer(null);
     },
@@ -135,9 +126,8 @@ export default function HabitScreen() {
           queryKey: ["getHabitsWithCompletion"],
         }),
         queryClient.invalidateQueries({
-          queryKey: ["getOrCreateDailyReviewByDate"],
+          queryKey: ["habitCompletionHistory"],
         }),
-        queryClient.invalidateQueries({ queryKey: ["getAllDailyReviews"] }),
       ]);
       setDrawer(null);
     },
@@ -200,6 +190,7 @@ export default function HabitScreen() {
               disableEditsQuery.data ? undefined : () => openUpdateDrawer(habit)
             }
             onToggle={() => toggleHabitMutation.mutate(habit.id)}
+            streak={habit.streak}
             title={habit.title}
           />
         ))}
@@ -228,6 +219,7 @@ export default function HabitScreen() {
                         : () => openUpdateDrawer(habit)
                     }
                     onToggle={() => toggleHabitMutation.mutate(habit.id)}
+                    streak={habit.streak}
                     title={habit.title}
                   />
                 ))

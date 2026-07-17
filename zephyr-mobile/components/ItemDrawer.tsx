@@ -5,6 +5,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   View,
 } from "react-native";
@@ -81,11 +82,11 @@ export default function ItemDrawer({
       visible={visible}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         className="flex-1 justify-end bg-black/30"
       >
         <Pressable className="absolute inset-0" onPress={closeDrawer} />
-        <View className="bg-white px-5 pb-6 pt-4">
+        <View className="max-h-[90%] bg-white px-5 pb-6 pt-4">
           <View className="mb-4 flex-row items-center justify-between">
             <Text className="text-xl font-bold text-black">{title}</Text>
             <Pressable className="px-2 py-1" onPress={closeDrawer}>
@@ -95,7 +96,12 @@ export default function ItemDrawer({
             </Pressable>
           </View>
 
-          <View className="gap-3">{children}</View>
+          <ScrollView
+            contentContainerClassName="gap-3"
+            keyboardShouldPersistTaps="handled"
+          >
+            {children}
+          </ScrollView>
 
           {error ? (
             <Text className="mt-3 text-sm text-neutral-500">{error}</Text>

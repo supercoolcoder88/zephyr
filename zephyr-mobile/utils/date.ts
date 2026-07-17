@@ -6,6 +6,13 @@ export function getLocalDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+export function shiftDateKey(dateKey: string, days: number) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day + days);
+
+  return getLocalDateKey(date);
+}
+
 export function formatDateKeyForDisplay(dateKey: string) {
   const [year, month, day] = dateKey.split("-");
 

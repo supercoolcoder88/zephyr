@@ -10,13 +10,9 @@ const taskIcon = selectIcon({
   android: "task_alt",
   ios: "checkmark.square",
 });
-const trackerIcon = selectIcon({
-  android: "target",
-  ios: "target",
-});
-const reviewIcon = selectIcon({
-  android: "monitoring",
-  ios: "chart.line.uptrend.xyaxis",
+const focusIcon = selectIcon({
+  android: "timer",
+  ios: "timer",
 });
 const settingsIcon = selectIcon({
   android: "settings",
@@ -60,21 +56,13 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="tracker"
+        name="focus"
         options={{
           tabBarIcon: ({ color, size }) => (
-            <ExpoIcon color={color} name={trackerIcon} size={size} />
+            <ExpoIcon color={color} name={focusIcon} size={size} />
           ),
-          title: "Trackers",
-        }}
-      />
-      <Tabs.Screen
-        name="daily-review"
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <ExpoIcon color={color} name={reviewIcon} size={size} />
-          ),
-          title: "Review",
+          tabBarStyle: { display: "none" },
+          title: "Focus",
         }}
       />
       <Tabs.Screen

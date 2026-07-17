@@ -1,7 +1,6 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
 const HIDE_HABIT_ADD_BUTTON = "hide_habit_add_button";
-const HIDE_TRACKER_ADD_BUTTON = "hide_tracker_add_button";
 const DISABLE_EDITS = "disable_edits";
 
 async function getBooleanSetting(database: SQLiteDatabase, key: string) {
@@ -36,17 +35,6 @@ export function setHideHabitAddButton(
   hidden: boolean,
 ) {
   return setBooleanSetting(database, HIDE_HABIT_ADD_BUTTON, hidden);
-}
-
-export function getHideTrackerAddButton(database: SQLiteDatabase) {
-  return getBooleanSetting(database, HIDE_TRACKER_ADD_BUTTON);
-}
-
-export function setHideTrackerAddButton(
-  database: SQLiteDatabase,
-  hidden: boolean,
-) {
-  return setBooleanSetting(database, HIDE_TRACKER_ADD_BUTTON, hidden);
 }
 
 export function getDisableEdits(database: SQLiteDatabase) {

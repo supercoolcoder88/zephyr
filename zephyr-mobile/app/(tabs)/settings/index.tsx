@@ -5,10 +5,8 @@ import { Pressable, Text, View } from "react-native";
 import {
   getDisableEdits,
   getHideHabitAddButton,
-  getHideTrackerAddButton,
   setDisableEdits,
   setHideHabitAddButton,
-  setHideTrackerAddButton,
 } from "../../../db/settings";
 
 export default function SettingsScreen() {
@@ -24,16 +22,6 @@ export default function SettingsScreen() {
       queryClient.setQueryData(["hideHabitAddButton"], hidden);
     },
   });
-  const trackerSettingQuery = useQuery({
-    queryKey: ["hideTrackerAddButton"],
-    queryFn: () => getHideTrackerAddButton(database),
-  });
-  const trackerSettingMutation = useMutation({
-    mutationFn: (hidden: boolean) => setHideTrackerAddButton(database, hidden),
-    onSuccess: (_, hidden) => {
-      queryClient.setQueryData(["hideTrackerAddButton"], hidden);
-    },
-  });
   const disableEditsQuery = useQuery({
     queryKey: ["disableEdits"],
     queryFn: () => getDisableEdits(database),
@@ -45,7 +33,6 @@ export default function SettingsScreen() {
     },
   });
   const habitHidden = habitSettingQuery.data ?? false;
-  const trackerHidden = trackerSettingQuery.data ?? false;
   const editsDisabled = disableEditsQuery.data ?? false;
 
   return (
@@ -63,25 +50,6 @@ export default function SettingsScreen() {
             habitSettingQuery.isLoading || habitSettingMutation.isPending
           }
           onPress={() => habitSettingMutation.mutate(!habitHidden)}
-        >
-          <View className="h-5 w-5 rounded-full bg-white" />
-        </Pressable>
-      </View>
-      <View className="flex-row items-center justify-between border-b border-neutral-100 py-3">
-        <Text className="font-semibold text-black">
-          Hide tracker add button
-        </Text>
-        <Pressable
-          accessibilityLabel="Hide tracker add button"
-          accessibilityRole="switch"
-          accessibilityState={{ checked: trackerHidden }}
-          className={`h-7 w-12 justify-center rounded-full p-1 ${
-            trackerHidden ? "items-end bg-black" : "items-start bg-neutral-300"
-          }`}
-          disabled={
-            trackerSettingQuery.isLoading || trackerSettingMutation.isPending
-          }
-          onPress={() => trackerSettingMutation.mutate(!trackerHidden)}
         >
           <View className="h-5 w-5 rounded-full bg-white" />
         </Pressable>

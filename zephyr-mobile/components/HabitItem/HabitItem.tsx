@@ -4,6 +4,7 @@ export type HabitItemProps = {
   completed: boolean;
   onPress?: () => void;
   onToggle: () => void;
+  streak: number;
   title: string;
 };
 
@@ -11,6 +12,7 @@ export default function HabitItem({
   completed,
   onPress,
   onToggle,
+  streak,
   title,
 }: HabitItemProps) {
   return (
@@ -26,6 +28,11 @@ export default function HabitItem({
         >
           {title}
         </Text>
+        {!completed && streak > 0 ? (
+          <Text className="ml-2 text-sm font-semibold text-green-400">
+            | {streak}
+          </Text>
+        ) : null}
       </View>
       <Pressable
         accessibilityLabel={

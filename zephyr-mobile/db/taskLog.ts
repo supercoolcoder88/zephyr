@@ -1,7 +1,5 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
-import { refreshDailyReview } from "./dailyReview";
-
 export type TaskLogStatus = "INCOMPLETE" | "INPROGRESS" | "COMPLETE";
 
 export type TaskLog = {
@@ -32,8 +30,6 @@ export async function createTaskLog(
     input.date,
     input.status,
   );
-  await refreshDailyReview(database, input.date);
-
   return input;
 }
 
@@ -50,6 +46,22 @@ export function getTaskLog(
     `,
     taskId,
     date,
+  );
+}
+
+export function getLatestTaskLog(
+  database: SQLiteDatabase,
+  taskId: number,
+): Promise<TaskLog | null> {
+  return database.getFirstAsync<TaskLogRow>(
+    `
+      SELECT task_id AS taskId, date, status
+      FROM task_log
+      WHERE task_id = ?
+      ORDER BY date DESC
+      LIMIT 1
+    `,
+    taskId,
   );
 }
 
@@ -74,7 +86,6 @@ export async function updateTaskLog(
       taskId,
       date,
     );
-    await refreshDailyReview(database, date);
   }
 
   return getTaskLog(database, taskId, date);
@@ -85,12 +96,12 @@ export async function updateTaskLogStatus(
   taskId: number,
   date: string,
 ): Promise<TaskLog> {
-  const currentLog = await getTaskLog(database, taskId, date);
+  const currentLog = await getLatestTaskLog(database, taskId);
   const currentStatus: TaskLogStatus = currentLog?.status ?? "INCOMPLETE";
   const nextStatus: TaskLogStatus =
     currentStatus === "COMPLETE" ? "INCOMPLETE" : "COMPLETE";
 
-  if (currentLog) {
+  if (currentLog?.date === date) {
     await database.runAsync(
       "UPDATE task_log SET status = ? WHERE task_id = ? AND date = ?",
       nextStatus,
@@ -105,8 +116,6 @@ export async function updateTaskLogStatus(
       nextStatus,
     );
   }
-
-  await refreshDailyReview(database, date);
 
   return {
     taskId,
@@ -125,5 +134,4 @@ export async function deleteTaskLog(
     taskId,
     date,
   );
-  await refreshDailyReview(database, date);
 }

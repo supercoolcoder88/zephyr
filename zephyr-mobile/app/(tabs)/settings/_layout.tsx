@@ -11,6 +11,7 @@ export default function SettingsLayout() {
           fontSize: 28,
           fontWeight: "700",
         },
+        orientation: "portrait",
       }}
     >
       <Stack.Screen name="index" options={{ title: "Settings" }} />
