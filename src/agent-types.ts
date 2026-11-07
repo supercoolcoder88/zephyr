@@ -3,7 +3,14 @@ export type AgentEvent =
   | { type: 'session'; sessionId: string }
   | { type: 'text'; text: string }
   | { type: 'tool'; name: string; input: unknown }
-  | { type: 'done'; ok: boolean; result: string; costUsd: number }
+  | {
+      type: 'done';
+      ok: boolean;
+      result: string;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+    }
   | { type: 'error'; message: string };
 
 export type ThreadItem =

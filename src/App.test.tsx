@@ -185,7 +185,16 @@ it('swaps a draft to its session id and refreshes the list after the run', async
 
   act(() => emit({ type: 'session', sessionId: 'sid' }));
   act(() => emit({ type: 'text', text: 'live answer' }));
-  act(() => emit({ type: 'done', ok: true, result: 'ok', costUsd: 0.01 }));
+  act(() =>
+    emit({
+      type: 'done',
+      ok: true,
+      result: 'ok',
+      costUsd: 0.01,
+      inputTokens: 0,
+      outputTokens: 0,
+    }),
+  );
   expect(screen.getByText('live answer')).toBeInTheDocument();
   expect(heading()).toBe('first prompt');
 
@@ -367,7 +376,16 @@ it('orders threads by state and clears outcomes once seen', async () => {
   expect(state(/Oldest/)).toBe('error');
   expect(sidebarTitles()).toEqual(['Oldest', 'Older', 'Newest']);
 
-  act(() => emit({ type: 'done', ok: true, result: 'ok', costUsd: 0 }));
+  act(() =>
+    emit({
+      type: 'done',
+      ok: true,
+      result: 'ok',
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    }),
+  );
   await act(async () => finishRun());
   expect(state(/Older/)).toBe('done');
   expect(sidebarTitles()).toEqual(['Oldest', 'Older', 'Newest']);
@@ -394,7 +412,16 @@ async function running() {
 }
 
 const finish = async () => {
-  act(() => emit({ type: 'done', ok: true, result: 'ok', costUsd: 0 }));
+  act(() =>
+    emit({
+      type: 'done',
+      ok: true,
+      result: 'ok',
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    }),
+  );
   await act(async () => finishRun());
 };
 
@@ -508,4 +535,22 @@ it('renders bold as strong inside markdown', async () => {
   const strong = screen.getByText('loud');
   expect(strong.tagName).toBe('STRONG');
   expect(strong.closest('.markdown')).not.toBeNull();
+});
+
+it('shows cost and token usage once the run is done', async () => {
+  const user = await open();
+  await sendPrompt(user, 'hi');
+  act(() =>
+    emit({
+      type: 'done',
+      ok: true,
+      result: 'ok',
+      costUsd: 0.0123,
+      inputTokens: 12345,
+      outputTokens: 678,
+    }),
+  );
+  expect(
+    screen.getByText('DONE · $0.0123 · 12.3K IN · 678 OUT'),
+  ).toBeInTheDocument();
 });

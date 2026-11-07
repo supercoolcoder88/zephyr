@@ -5,6 +5,11 @@ import remarkGfm from 'remark-gfm';
 import type { ThreadItem } from '../agent-types';
 import type { Thread } from '../thread';
 
+const tokens = new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+
 interface Props {
   thread: Thread;
   running: boolean;
@@ -215,7 +220,8 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
           className={`pl-3 text-2xs tracking-widest ${item.ok ? 'text-mute' : 'text-alert'}`}
         >
           {item.ok ? 'DONE' : `FAILED · ${item.result}`} · $
-          {item.costUsd.toFixed(4)}
+          {item.costUsd.toFixed(4)} · {tokens.format(item.inputTokens)} IN ·{' '}
+          {tokens.format(item.outputTokens)} OUT
         </p>
       );
     case 'error':
