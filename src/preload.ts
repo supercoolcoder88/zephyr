@@ -8,6 +8,11 @@ const agent: AgentApi = {
     ipcRenderer.invoke('agent:run', prompt, cwd, resume),
   pickWorkspace: () => ipcRenderer.invoke('workspace:pick'),
   cancel: () => ipcRenderer.invoke('agent:cancel'),
+  listThreads: (cwd) => ipcRenderer.invoke('threads:list', cwd),
+  loadThread: (sessionId, cwd) =>
+    ipcRenderer.invoke('threads:load', sessionId, cwd),
+  deleteThread: (sessionId, cwd) =>
+    ipcRenderer.invoke('threads:delete', sessionId, cwd),
   onEvent: (listener) => {
     const handler = (_: IpcRendererEvent, event: AgentEvent) => listener(event);
     ipcRenderer.on('agent:event', handler);

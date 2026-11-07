@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { Thread, ThreadItem } from '../thread';
+import type { ThreadItem } from '../agent-types';
+import type { Thread } from '../thread';
 
 interface Props {
   thread: Thread;
@@ -21,11 +22,12 @@ export default function ChatThread({
 }: Props) {
   const [prompt, setPrompt] = useState('');
   const bottom = useRef<HTMLDivElement>(null);
-  const turns = groupTurns(thread.items);
+  const items = thread.items ?? [];
+  const turns = groupTurns(items);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
-  }, [thread.items.length]);
+  }, [items.length]);
 
   function submit(e: FormEvent) {
     e.preventDefault();

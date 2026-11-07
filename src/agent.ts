@@ -6,8 +6,11 @@ import {
   type WebContents,
 } from 'electron';
 import path from 'node:path';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentEvent } from './agent-types';
+import type {
+  SDKAssistantMessage,
+  SDKMessage,
+} from '@anthropic-ai/claude-agent-sdk';
+import type { AgentEvent, ThreadItem } from './agent-types';
 
 // The SDK is ESM-only and spawns a native Claude Code binary, so it stays
 // external to the Vite bundle and is loaded lazily on first use.
@@ -33,6 +36,19 @@ function send(target: WebContents, event: AgentEvent) {
   if (!target.isDestroyed()) target.send('agent:event', event);
 }
 
+type AssistantContent = SDKAssistantMessage['message']['content'];
+
+function blockEvents(content: AssistantContent) {
+  return content.flatMap(
+    (block): Extract<AgentEvent, { type: 'text' | 'tool' }>[] =>
+      block.type === 'text'
+        ? [{ type: 'text', text: block.text }]
+        : block.type === 'tool_use'
+          ? [{ type: 'tool', name: block.name, input: block.input }]
+          : [],
+  );
+}
+
 function forward(target: WebContents, message: SDKMessage) {
   switch (message.type) {
     case 'system':
@@ -41,12 +57,8 @@ function forward(target: WebContents, message: SDKMessage) {
       }
       break;
     case 'assistant':
-      for (const block of message.message.content) {
-        if (block.type === 'text') {
-          send(target, { type: 'text', text: block.text });
-        } else if (block.type === 'tool_use') {
-          send(target, { type: 'tool', name: block.name, input: block.input });
-        }
+      for (const event of blockEvents(message.message.content)) {
+        send(target, event);
       }
       break;
     case 'result':
@@ -110,6 +122,57 @@ export function registerAgentIpc() {
     );
     return filePaths[0];
   });
+
+  ipcMain.handle('threads:list', async (_, cwd: string) => {
+    const { listSessions } = await loadSdk();
+    const sessions = await listSessions({ dir: cwd });
+    return sessions
+      .sort((a, b) => b.lastModified - a.lastModified)
+      .map((s) => ({
+        id: s.sessionId,
+        title: (s.customTitle || s.summary || s.firstPrompt || 'Untitled')
+          .trim()
+          .slice(0, 48),
+        updatedAt: s.lastModified,
+      }));
+  });
+
+  ipcMain.handle('threads:load', async (_, sessionId: string, cwd: string) => {
+    const { getSessionMessages } = await loadSdk();
+    const items: ThreadItem[] = [];
+    // Subagent traffic carries a parent_tool_use_id; only the main conversation is shown.
+    for (const m of await getSessionMessages(sessionId, { dir: cwd })) {
+      if (m.parent_tool_use_id) continue;
+      if (m.type === 'assistant') {
+        items.push(
+          ...blockEvents((m.message as { content: AssistantContent }).content),
+        );
+      } else if (m.type === 'user') {
+        const { content } = m.message as {
+          content: string | { type: string; text?: string }[];
+        };
+        const texts =
+          typeof content === 'string'
+            ? [content]
+            : content.flatMap((b) => (b.type === 'text' ? [b.text] : []));
+        if (texts.length) items.push({ type: 'user', text: texts.join('\n') });
+      }
+    }
+    return items;
+  });
+
+  ipcMain.handle(
+    'threads:delete',
+    async (_, sessionId: string, cwd: string) => {
+      const { deleteSession } = await loadSdk();
+      // Already gone (or a retry after a partial delete) counts as deleted.
+      await deleteSession(sessionId, { dir: cwd }).catch((err: unknown) => {
+        if (!(err instanceof Error && /not found/i.test(err.message))) {
+          throw err;
+        }
+      });
+    },
+  );
 
   ipcMain.handle('agent:cancel', (ipcEvent) => {
     runs.get(ipcEvent.sender.id)?.abort();

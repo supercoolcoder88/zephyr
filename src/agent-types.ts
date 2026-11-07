@@ -6,9 +6,18 @@ export type AgentEvent =
   | { type: 'done'; ok: boolean; result: string; costUsd: number }
   | { type: 'error'; message: string };
 
+export type ThreadItem =
+  | Exclude<AgentEvent, { type: 'session' }>
+  | { type: 'user'; text: string };
+
 export interface AgentApi {
   run(prompt: string, cwd: string, resume?: string): Promise<void>;
   pickWorkspace(): Promise<string | undefined>;
   cancel(): Promise<void>;
   onEvent(listener: (event: AgentEvent) => void): () => void;
+  listThreads(
+    cwd: string,
+  ): Promise<{ id: string; title: string; updatedAt: number }[]>;
+  loadThread(sessionId: string, cwd: string): Promise<ThreadItem[]>;
+  deleteThread(sessionId: string, cwd: string): Promise<void>;
 }

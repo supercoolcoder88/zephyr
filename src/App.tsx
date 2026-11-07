@@ -1,7 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import ChatThread from './components/ChatThread';
 import Sidebar from './components/Sidebar';
-import { newThread, type Thread, type ThreadItem } from './thread';
+import type { ThreadItem } from './agent-types';
+import { newThread, type Thread } from './thread';
+
+type Listed = Awaited<ReturnType<typeof window.agent.listThreads>>;
+
+// Keeps unsent drafts plus loaded transcripts and render keys of listed threads.
+function merge(mine: Thread[], cwd: string, list: Listed): Thread[] {
+  return [
+    ...mine.filter((t) => t.draft && !list.some((l) => l.id === t.id)),
+    ...list.map(({ id, title }) => {
+      const known = mine.find((t) => t.id === id);
+      return { id, title, cwd, items: known?.items, key: known?.key };
+    }),
+  ];
+}
 
 export default function App() {
   const [workspace, setWorkspace] = useState<string>();
@@ -9,27 +23,36 @@ export default function App() {
   const [activeId, setActiveId] = useState<string>();
   const [runningId, setRunningId] = useState<string>();
   const [finishedId, setFinishedId] = useState<string>();
+  const [deleteError, setDeleteError] = useState<string>();
   // Agent events carry no thread id; they belong to whichever thread started the run.
-  const runningRef = useRef<string>(undefined);
+  const runningRef = useRef<{ id: string; draft?: true }>(undefined);
 
   function patch(id: string, update: (thread: Thread) => Thread) {
     setThreads((prev) => prev.map((t) => (t.id === id ? update(t) : t)));
   }
 
   function append(id: string, item: ThreadItem) {
-    patch(id, (t) => ({ ...t, items: [...t.items, item] }));
+    patch(id, (t) => ({ ...t, items: [...(t.items ?? []), item] }));
   }
 
   useEffect(
     () =>
       window.agent.onEvent((event) => {
-        const id = runningRef.current;
-        if (!id) return;
-        if (event.type === 'session') {
-          patch(id, (t) => ({ ...t, sessionId: event.sessionId }));
-        } else {
-          append(id, event);
-        }
+        const run = runningRef.current;
+        if (!run) return;
+        if (event.type !== 'session') return append(run.id, event);
+        if (!run.draft) return;
+        // A draft becomes a real thread once Claude assigns its session id.
+        const { sessionId } = event;
+        runningRef.current = { id: sessionId };
+        patch(run.id, (t) => ({
+          ...t,
+          key: t.key ?? t.id,
+          id: sessionId,
+          draft: undefined,
+        }));
+        setActiveId((a) => (a === run.id ? sessionId : a));
+        setRunningId(sessionId);
       }),
     [],
   );
@@ -39,54 +62,110 @@ export default function App() {
 
   async function send(prompt: string) {
     if (!active) return;
-    const id = active.id;
+    setDeleteError(undefined);
+    const { id, cwd, draft } = active;
     patch(id, (t) => ({
       ...t,
-      title: t.items.length === 0 ? prompt.slice(0, 48) : t.title,
-      items: [...t.items, { type: 'user', text: prompt }],
+      title: t.draft && t.items?.length === 0 ? prompt.slice(0, 48) : t.title,
+      items: [...(t.items ?? []), { type: 'user', text: prompt }],
     }));
-    runningRef.current = id;
+    runningRef.current = { id, draft };
     setRunningId(id);
     setFinishedId(undefined);
     try {
-      // Passing the thread's session id continues the same conversation.
-      await window.agent.run(prompt, active.cwd, active.sessionId);
+      await window.agent.run(prompt, cwd, draft ? undefined : id);
     } finally {
+      setFinishedId(runningRef.current?.id);
       runningRef.current = undefined;
       setRunningId(undefined);
-      setFinishedId(id);
     }
+    const list = await window.agent.listThreads(cwd);
+    setThreads((prev) => [
+      ...prev.filter((t) => t.cwd !== cwd),
+      ...merge(
+        prev.filter((t) => t.cwd === cwd),
+        cwd,
+        list,
+      ),
+    ]);
   }
 
-  function select(id: string) {
-    setActiveId(id);
+  function select(thread: Thread) {
+    setActiveId(thread.id);
     setFinishedId(undefined);
+    setDeleteError(undefined);
+    if (thread.items) return;
+    window.agent.loadThread(thread.id, thread.cwd).then(
+      (items) => patch(thread.id, (t) => ({ ...t, items })),
+      (err) =>
+        patch(thread.id, (t) => ({
+          ...t,
+          items: [
+            {
+              type: 'error',
+              message: err instanceof Error ? err.message : String(err),
+            },
+          ],
+        })),
+    );
   }
 
   function create() {
     if (!workspace) return;
-    const empty = visible.find((t) => t.items.length === 0);
-    if (empty) return select(empty.id);
+    const empty = visible.find((t) => t.draft && t.items?.length === 0);
+    if (empty) return select(empty);
     const thread = newThread(workspace);
-    setThreads((prev) => [...prev, thread]);
-    select(thread.id);
+    setThreads((prev) => [thread, ...prev]);
+    select(thread);
+  }
+
+  async function remove(id: string) {
+    const thread = visible.find((t) => t.id === id)!;
+    if (id === runningId) return;
+    setDeleteError(undefined);
+    if (!thread.draft) {
+      try {
+        await window.agent.deleteThread(id, thread.cwd);
+      } catch (err) {
+        setDeleteError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
+    setThreads((prev) => prev.filter((t) => t.id !== id));
+    if (thread !== active) return;
+    const i = visible.indexOf(thread);
+    const next = visible[i + 1] ?? visible[i - 1];
+    if (next) return select(next);
+    const fresh = newThread(thread.cwd);
+    setThreads((prev) => [fresh, ...prev]);
+    select(fresh);
   }
 
   async function openWorkspace() {
+    setDeleteError(undefined);
     const cwd = await window.agent.pickWorkspace();
     if (!cwd || cwd === workspace) return;
+    const list = await window.agent.listThreads(cwd);
+    const mine = merge(
+      threads.filter((t) => t.cwd === cwd),
+      cwd,
+      list,
+    );
+    const loaded = mine.length ? mine : [newThread(cwd)];
+    setThreads((prev) => [...prev.filter((t) => t.cwd !== cwd), ...loaded]);
     setWorkspace(cwd);
-    const existing = threads.find((t) => t.cwd === cwd);
-    if (existing) return select(existing.id);
-    const thread = newThread(cwd);
-    setThreads((prev) => [...prev, thread]);
-    select(thread.id);
+    select(loaded[0]);
   }
 
   if (!active) {
     return (
       <main className="flex h-screen flex-col items-center justify-center gap-8 bg-void text-ink">
-        <h1 className="text-5xl font-medium tracking-[0.3em]">ZEPHYR</h1>
+        <div className="flex flex-col items-center gap-2">
+          <h1 className="text-5xl font-medium tracking-[0.3em]">ZEPHYR</h1>
+          {import.meta.env.DEV && (
+            <span className="text-2xs tracking-widest text-mute">DEV</span>
+          )}
+        </div>
         <button
           type="button"
           onClick={openWorkspace}
@@ -106,11 +185,13 @@ export default function App() {
         threads={visible}
         activeId={active.id}
         runningId={runningId}
-        onSelect={select}
+        onSelect={(id) => select(visible.find((t) => t.id === id)!)}
         onNew={create}
+        onDelete={remove}
+        error={deleteError}
       />
       <ChatThread
-        key={active.id}
+        key={active.key ?? active.id}
         thread={active}
         running={runningId === active.id}
         busy={runningId !== undefined && runningId !== active.id}
