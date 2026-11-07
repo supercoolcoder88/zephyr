@@ -1,1 +1,103 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* Tokens and rules are documented in STYLES.md. */
+@theme {
+  --color-void: #000;
+  --color-panel: #0a0a0a;
+  --color-line: #1f1f1f;
+  --color-line-strong: #3a3a3a;
+  --color-mute: #6b6b6b;
+  --color-ink: #ededed;
+  --color-paper: #fff;
+  --color-cyan: #00e5ff;
+  --color-cyan-deep: #0066ff;
+  --color-alert: #ff2e4d;
+
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+  --font-sans: var(--font-mono);
+
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+
+  --radius-*: initial;
+  --ease-mech: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--color-void);
+    color: var(--color-ink);
+    font-family: var(--font-mono);
+  }
+
+  :focus-visible {
+    outline: 1px solid var(--color-cyan);
+    outline-offset: 0;
+  }
+
+  ::selection {
+    background: var(--color-paper);
+    color: var(--color-void);
+  }
+}
+
+@utility glow {
+  box-shadow:
+    0 0 0 1px var(--color-cyan),
+    0 0 12px -2px var(--color-cyan-deep);
+}
+
+@utility chamfer {
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+}
+
+/* Cyan sweep along an element's top edge while the agent runs. */
+@utility scanline {
+  position: relative;
+  &::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: 0;
+    height: 1px;
+    width: 30%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-cyan-deep),
+      var(--color-cyan)
+    );
+    animation: scan 1.4s var(--ease-mech) infinite;
+  }
+}
+
+/* One-shot glow pulse when a run completes. */
+@utility flash {
+  animation: flash 400ms var(--ease-mech) 1;
+}
+
+@keyframes scan {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@keyframes flash {
+  0% {
+    box-shadow:
+      0 0 0 1px var(--color-cyan),
+      0 0 16px 0 var(--color-cyan-deep);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px transparent,
+      0 0 0 0 transparent;
+  }
+}

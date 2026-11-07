@@ -1,94 +1,91 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import type { AgentEvent } from './agent-types';
+import { useEffect, useRef, useState } from 'react';
+import ChatThread from './components/ChatThread';
+import Sidebar from './components/Sidebar';
+import { newThread, type Thread, type ThreadItem } from './thread';
 
 export default function App() {
-  const [prompt, setPrompt] = useState('');
-  const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [sessionId, setSessionId] = useState<string>();
-  const [running, setRunning] = useState(false);
+  const [threads, setThreads] = useState<Thread[]>(() => [newThread()]);
+  const [activeId, setActiveId] = useState(threads[0].id);
+  const [runningId, setRunningId] = useState<string>();
+  const [finishedId, setFinishedId] = useState<string>();
+  // Agent events carry no thread id; they belong to whichever thread started the run.
+  const runningRef = useRef<string>(undefined);
+
+  function patch(id: string, update: (thread: Thread) => Thread) {
+    setThreads((prev) => prev.map((t) => (t.id === id ? update(t) : t)));
+  }
+
+  function append(id: string, item: ThreadItem) {
+    patch(id, (t) => ({ ...t, items: [...t.items, item] }));
+  }
 
   useEffect(
     () =>
       window.agent.onEvent((event) => {
-        if (event.type === 'session') setSessionId(event.sessionId);
-        else setEvents((prev) => [...prev, event]);
+        const id = runningRef.current;
+        if (!id) return;
+        if (event.type === 'session') {
+          patch(id, (t) => ({ ...t, sessionId: event.sessionId }));
+        } else {
+          append(id, event);
+        }
       }),
     [],
   );
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!prompt.trim() || running) return;
-    setEvents((prev) => [...prev, { type: 'text', text: `> ${prompt}` }]);
-    setPrompt('');
-    setRunning(true);
+  const active = threads.find((t) => t.id === activeId) ?? threads[0];
+
+  async function send(prompt: string) {
+    const id = active.id;
+    patch(id, (t) => ({
+      ...t,
+      title: t.items.length === 0 ? prompt.slice(0, 48) : t.title,
+      items: [...t.items, { type: 'user', text: prompt }],
+    }));
+    runningRef.current = id;
+    setRunningId(id);
+    setFinishedId(undefined);
     try {
-      // Passing the last session id continues the same conversation.
-      await window.agent.run(prompt, sessionId);
+      // Passing the thread's session id continues the same conversation.
+      await window.agent.run(prompt, active.sessionId);
     } finally {
-      setRunning(false);
+      runningRef.current = undefined;
+      setRunningId(undefined);
+      setFinishedId(id);
     }
   }
 
+  function select(id: string) {
+    setActiveId(id);
+    setFinishedId(undefined);
+  }
+
+  function create() {
+    const empty = threads.find((t) => t.items.length === 0);
+    if (empty) return select(empty.id);
+    const thread = newThread();
+    setThreads((prev) => [...prev, thread]);
+    select(thread.id);
+  }
+
   return (
-    <main className="flex h-screen flex-col bg-slate-950 text-slate-100">
-      <div className="flex-1 space-y-2 overflow-y-auto p-4 font-mono text-sm">
-        {events.map((event, i) => (
-          <EventLine key={i} event={event} />
-        ))}
-        {running && <p className="text-slate-500">…</p>}
-      </div>
-      <form
-        onSubmit={submit}
-        className="flex gap-2 border-t border-slate-800 p-3"
-      >
-        <input
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Ask the agent…"
-          className="flex-1 rounded-lg bg-slate-900 px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500"
-        />
-        {running ? (
-          <button
-            type="button"
-            onClick={() => window.agent.cancel()}
-            className="rounded-lg bg-rose-600 px-4 py-2 font-medium hover:bg-rose-500"
-          >
-            Stop
-          </button>
-        ) : (
-          <button
-            type="submit"
-            className="rounded-lg bg-sky-500 px-4 py-2 font-medium hover:bg-sky-400"
-          >
-            Send
-          </button>
-        )}
-      </form>
+    <main className="flex h-screen bg-void text-ink">
+      <Sidebar
+        threads={threads}
+        activeId={active.id}
+        runningId={runningId}
+        onSelect={select}
+        onNew={create}
+      />
+      <ChatThread
+        key={active.id}
+        thread={active}
+        running={runningId === active.id}
+        busy={runningId !== undefined && runningId !== active.id}
+        justFinished={finishedId === active.id}
+        onSend={send}
+        onCancel={() => window.agent.cancel()}
+      />
     </main>
   );
-}
-
-function EventLine({ event }: { event: AgentEvent }) {
-  switch (event.type) {
-    case 'text':
-      return <p className="whitespace-pre-wrap">{event.text}</p>;
-    case 'tool':
-      return (
-        <p className="text-amber-400">
-          ⚙ {event.name} {JSON.stringify(event.input)}
-        </p>
-      );
-    case 'done':
-      return (
-        <p className={event.ok ? 'text-emerald-400' : 'text-rose-400'}>
-          {event.ok ? '✓ done' : `✗ ${event.result}`} · $
-          {event.costUsd.toFixed(4)}
-        </p>
-      );
-    case 'error':
-      return <p className="text-rose-400">error: {event.message}</p>;
-    default:
-      return null;
-  }
 }
