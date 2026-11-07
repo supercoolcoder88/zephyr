@@ -6,10 +6,19 @@ import { newThread, type Thread } from './thread';
 
 type Listed = Awaited<ReturnType<typeof window.agent.listThreads>>;
 
-// Keeps unsent drafts plus loaded transcripts and render keys of listed threads.
-function merge(mine: Thread[], cwd: string, list: Listed): Thread[] {
+// Keeps unsent drafts and running threads the list doesn't know about yet,
+// plus loaded transcripts and render keys of listed threads.
+function merge(
+  mine: Thread[],
+  cwd: string,
+  list: Listed,
+  running: string[],
+): Thread[] {
   return [
-    ...mine.filter((t) => t.draft && !list.some((l) => l.id === t.id)),
+    ...mine.filter(
+      (t) =>
+        (t.draft || running.includes(t.id)) && !list.some((l) => l.id === t.id),
+    ),
     ...list.map(({ id, title }) => {
       const known = mine.find((t) => t.id === id);
       return { id, title, cwd, items: known?.items, key: known?.key };
@@ -21,11 +30,13 @@ export default function App() {
   const [workspace, setWorkspace] = useState<string>();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeId, setActiveId] = useState<string>();
-  const [runningId, setRunningId] = useState<string>();
+  const [runningIds, setRunningIds] = useState<string[]>([]);
   const [finishedId, setFinishedId] = useState<string>();
   const [deleteError, setDeleteError] = useState<string>();
-  // Agent events carry no thread id; they belong to whichever thread started the run.
-  const runningRef = useRef<{ id: string; draft?: true }>(undefined);
+  // Run id -> the thread it belongs to; a draft's id changes when its session starts.
+  const runs = useRef(new Map<string, { id: string; draft?: true }>());
+  const runningThreads = () => [...runs.current.values()].map((r) => r.id);
+  const composer = useRef<HTMLTextAreaElement>(null);
 
   function patch(id: string, update: (thread: Thread) => Thread) {
     setThreads((prev) => prev.map((t) => (t.id === id ? update(t) : t)));
@@ -37,14 +48,14 @@ export default function App() {
 
   useEffect(
     () =>
-      window.agent.onEvent((event) => {
-        const run = runningRef.current;
+      window.agent.onEvent((runId, event) => {
+        const run = runs.current.get(runId);
         if (!run) return;
         if (event.type !== 'session') return append(run.id, event);
         if (!run.draft) return;
         // A draft becomes a real thread once Claude assigns its session id.
         const { sessionId } = event;
-        runningRef.current = { id: sessionId };
+        runs.current.set(runId, { id: sessionId });
         patch(run.id, (t) => ({
           ...t,
           key: t.key ?? t.id,
@@ -52,7 +63,9 @@ export default function App() {
           draft: undefined,
         }));
         setActiveId((a) => (a === run.id ? sessionId : a));
-        setRunningId(sessionId);
+        setRunningIds((prev) =>
+          prev.map((id) => (id === run.id ? sessionId : id)),
+        );
       }),
     [],
   );
@@ -69,15 +82,17 @@ export default function App() {
       title: t.draft && t.items?.length === 0 ? prompt.slice(0, 48) : t.title,
       items: [...(t.items ?? []), { type: 'user', text: prompt }],
     }));
-    runningRef.current = { id, draft };
-    setRunningId(id);
+    const runId = crypto.randomUUID();
+    runs.current.set(runId, { id, draft });
+    setRunningIds((prev) => [...prev, id]);
     setFinishedId(undefined);
     try {
-      await window.agent.run(prompt, cwd, draft ? undefined : id);
+      await window.agent.run(runId, prompt, cwd, draft ? undefined : id);
     } finally {
-      setFinishedId(runningRef.current?.id);
-      runningRef.current = undefined;
-      setRunningId(undefined);
+      const finished = runs.current.get(runId)!.id;
+      runs.current.delete(runId);
+      setFinishedId(finished);
+      setRunningIds((prev) => prev.filter((t) => t !== finished));
     }
     const list = await window.agent.listThreads(cwd);
     setThreads((prev) => [
@@ -86,6 +101,7 @@ export default function App() {
         prev.filter((t) => t.cwd === cwd),
         cwd,
         list,
+        runningThreads(),
       ),
     ]);
   }
@@ -113,7 +129,11 @@ export default function App() {
   function create() {
     if (!workspace) return;
     const empty = visible.find((t) => t.draft && t.items?.length === 0);
-    if (empty) return select(empty);
+    if (empty) {
+      select(empty);
+      composer.current?.focus();
+      return;
+    }
     const thread = newThread(workspace);
     setThreads((prev) => [thread, ...prev]);
     select(thread);
@@ -121,7 +141,7 @@ export default function App() {
 
   async function remove(id: string) {
     const thread = visible.find((t) => t.id === id)!;
-    if (id === runningId) return;
+    if (runningIds.includes(id)) return;
     setDeleteError(undefined);
     if (!thread.draft) {
       try {
@@ -150,6 +170,7 @@ export default function App() {
       threads.filter((t) => t.cwd === cwd),
       cwd,
       list,
+      runningThreads(),
     );
     const loaded = mine.length ? mine : [newThread(cwd)];
     setThreads((prev) => [...prev.filter((t) => t.cwd !== cwd), ...loaded]);
@@ -184,7 +205,7 @@ export default function App() {
         onOpenWorkspace={openWorkspace}
         threads={visible}
         activeId={active.id}
-        runningId={runningId}
+        runningIds={runningIds}
         onSelect={(id) => select(visible.find((t) => t.id === id)!)}
         onNew={create}
         onDelete={remove}
@@ -193,11 +214,15 @@ export default function App() {
       <ChatThread
         key={active.key ?? active.id}
         thread={active}
-        running={runningId === active.id}
-        busy={runningId !== undefined && runningId !== active.id}
+        running={runningIds.includes(active.id)}
         justFinished={finishedId === active.id}
         onSend={send}
-        onCancel={() => window.agent.cancel()}
+        onCancel={() => {
+          for (const [runId, run] of runs.current) {
+            if (run.id === active.id) window.agent.cancel(runId);
+          }
+        }}
+        composer={composer}
       />
     </main>
   );

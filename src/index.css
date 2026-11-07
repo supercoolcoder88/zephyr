@@ -52,6 +52,11 @@
     outline-offset: 0;
   }
 
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+
   ::selection {
     background: var(--color-paper);
     color: var(--color-void);

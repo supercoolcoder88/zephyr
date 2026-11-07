@@ -29,11 +29,11 @@ function packagedClaudeBinary() {
   );
 }
 
-// One in-flight run per window, so a window can cancel its own run.
-const runs = new Map<number, AbortController>();
+// Keyed by a renderer-chosen run id so each thread can cancel its own run.
+const runs = new Map<string, AbortController>();
 
-function send(target: WebContents, event: AgentEvent) {
-  if (!target.isDestroyed()) target.send('agent:event', event);
+function send(target: WebContents, runId: string, event: AgentEvent) {
+  if (!target.isDestroyed()) target.send('agent:event', runId, event);
 }
 
 type AssistantContent = SDKAssistantMessage['message']['content'];
@@ -49,20 +49,20 @@ function blockEvents(content: AssistantContent) {
   );
 }
 
-function forward(target: WebContents, message: SDKMessage) {
+function forward(target: WebContents, runId: string, message: SDKMessage) {
   switch (message.type) {
     case 'system':
       if (message.subtype === 'init') {
-        send(target, { type: 'session', sessionId: message.session_id });
+        send(target, runId, { type: 'session', sessionId: message.session_id });
       }
       break;
     case 'assistant':
       for (const event of blockEvents(message.message.content)) {
-        send(target, event);
+        send(target, runId, event);
       }
       break;
     case 'result':
-      send(target, {
+      send(target, runId, {
         type: 'done',
         ok: message.subtype === 'success' && !message.is_error,
         result:
@@ -76,11 +76,18 @@ function forward(target: WebContents, message: SDKMessage) {
 export function registerAgentIpc() {
   ipcMain.handle(
     'agent:run',
-    async (ipcEvent, prompt: string, cwd: string, resume?: string) => {
+    async (
+      ipcEvent,
+      runId: string,
+      prompt: string,
+      cwd: string,
+      resume?: string,
+    ) => {
       const target = ipcEvent.sender;
-      runs.get(target.id)?.abort();
       const abortController = new AbortController();
-      runs.set(target.id, abortController);
+      runs.set(runId, abortController);
+      const abort = () => abortController.abort();
+      target.once('destroyed', abort);
 
       try {
         const { query } = await loadSdk();
@@ -100,17 +107,18 @@ export function registerAgentIpc() {
             allowDangerouslySkipPermissions: true,
           },
         })) {
-          forward(target, message);
+          forward(target, runId, message);
         }
       } catch (err) {
         if (!abortController.signal.aborted) {
-          send(target, {
+          send(target, runId, {
             type: 'error',
             message: err instanceof Error ? err.message : String(err),
           });
         }
       } finally {
-        if (runs.get(target.id) === abortController) runs.delete(target.id);
+        runs.delete(runId);
+        target.off('destroyed', abort);
       }
     },
   );
@@ -174,7 +182,7 @@ export function registerAgentIpc() {
     },
   );
 
-  ipcMain.handle('agent:cancel', (ipcEvent) => {
-    runs.get(ipcEvent.sender.id)?.abort();
+  ipcMain.handle('agent:cancel', (_, runId: string) => {
+    runs.get(runId)?.abort();
   });
 }

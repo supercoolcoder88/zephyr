@@ -6,8 +6,11 @@ import type { AgentEvent } from './agent-types';
 
 type User = ReturnType<typeof userEvent.setup>;
 
-let emit: (event: AgentEvent) => void;
-let finishRun: () => void;
+let listener: (runId: string, event: AgentEvent) => void;
+const finishers = new Map<string, () => void>();
+const lastRunId = () => agent.run.mock.lastCall![0] as string;
+const emit = (event: AgentEvent, runId = lastRunId()) => listener(runId, event);
+const finishRun = (runId = lastRunId()) => finishers.get(runId)!();
 const agent = {
   run: vi.fn(),
   pickWorkspace: vi.fn(),
@@ -25,10 +28,11 @@ beforeEach(() => {
   agent.loadThread.mockResolvedValue([]);
   agent.deleteThread.mockResolvedValue(undefined);
   agent.run.mockImplementation(
-    () => new Promise<void>((resolve) => (finishRun = resolve)),
+    (runId: string) =>
+      new Promise<void>((resolve) => finishers.set(runId, resolve)),
   );
-  agent.onEvent.mockImplementation((listener) => {
-    emit = listener;
+  agent.onEvent.mockImplementation((l) => {
+    listener = l;
     return () => undefined;
   });
   window.agent = agent;
@@ -119,13 +123,47 @@ it('resumes the session when sending in a loaded thread', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
   await sendPrompt(user, 'continue');
-  expect(agent.run).toHaveBeenCalledWith('continue', '/proj', 'b');
+  expect(agent.run).toHaveBeenCalledWith(
+    expect.any(String),
+    'continue',
+    '/proj',
+    'b',
+  );
 });
 
 it('starts a fresh session when sending in a draft', async () => {
   const user = await open();
   await sendPrompt(user, 'start');
-  expect(agent.run).toHaveBeenCalledWith('start', '/proj', undefined);
+  expect(agent.run).toHaveBeenCalledWith(
+    expect.any(String),
+    'start',
+    '/proj',
+    undefined,
+  );
+});
+
+it('sends on Enter and inserts a newline on Shift+Enter', async () => {
+  const user = await open();
+  await user.type(
+    screen.getByPlaceholderText('Ask the agent…'),
+    'line one{Shift>}{Enter}{/Shift}line two{Enter}',
+  );
+  expect(agent.run).toHaveBeenCalledWith(
+    expect.any(String),
+    'line one\nline two',
+    '/proj',
+    undefined,
+  );
+});
+
+it('focuses the composer when starting a new thread', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await open();
+  const composer = () => screen.getByPlaceholderText('Ask the agent…');
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  expect(composer()).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  expect(composer()).toHaveFocus();
 });
 
 it('swaps a draft to its session id and refreshes the list after the run', async () => {
@@ -136,6 +174,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   expect(heading()).toBe('New thread');
   await sendPrompt(user, 'first prompt');
   expect(agent.run).toHaveBeenLastCalledWith(
+    expect.any(String),
     'first prompt',
     '/proj',
     undefined,
@@ -164,7 +203,12 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   expect(agent.loadThread).not.toHaveBeenCalledWith('sid', '/proj');
 
   await sendPrompt(user, 'second prompt');
-  expect(agent.run).toHaveBeenLastCalledWith('second prompt', '/proj', 'sid');
+  expect(agent.run).toHaveBeenLastCalledWith(
+    expect.any(String),
+    'second prompt',
+    '/proj',
+    'sid',
+  );
 });
 
 it('shows no delete control on the running thread', async () => {
@@ -175,6 +219,33 @@ it('shows no delete control on the running thread', async () => {
   await sendPrompt(user, 'go');
   expect(row(/Newest/).queryByRole('button', { name: '[ DEL ]' })).toBeNull();
   expect(row(/Older/).getByRole('button', { name: '[ DEL ]' })).toBeTruthy();
+});
+
+it('runs threads concurrently and routes events by run', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  agent.loadThread.mockResolvedValue([]);
+  const user = await open();
+  await sendPrompt(user, 'first');
+  const runB = lastRunId();
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  await sendPrompt(user, 'second');
+  const runA = lastRunId();
+  expect(runA).not.toBe(runB);
+  expect(agent.run).toHaveBeenLastCalledWith(runA, 'second', '/proj', 'a');
+
+  act(() => emit({ type: 'text', text: 'answer b' }, runB));
+  act(() => emit({ type: 'text', text: 'answer a' }, runA));
+  expect(screen.getByText('answer a')).toBeInTheDocument();
+  expect(screen.queryByText('answer b')).toBeNull();
+
+  await user.click(screen.getByRole('button', { name: '[ STOP ]' }));
+  expect(agent.cancel).toHaveBeenCalledWith(runA);
+
+  await act(async () => finishRun(runA));
+  expect(screen.getByText('IDLE')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: /Newest/ }));
+  expect(screen.getByText('answer b')).toBeInTheDocument();
+  expect(screen.getByText('RUNNING')).toBeInTheDocument();
 });
 
 it('asks for confirmation before deleting', async () => {

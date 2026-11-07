@@ -6,7 +6,7 @@ interface Props {
   onOpenWorkspace(): void;
   threads: Thread[];
   activeId: string;
-  runningId?: string;
+  runningIds: string[];
   onSelect(id: string): void;
   onNew(): void;
   onDelete(id: string): void;
@@ -18,7 +18,7 @@ export default function Sidebar({
   onOpenWorkspace,
   threads,
   activeId,
-  runningId,
+  runningIds,
   onSelect,
   onNew,
   onDelete,
@@ -87,11 +87,11 @@ export default function Sidebar({
                   {String(i + 1).padStart(2, '0')}
                 </span>
                 <span className="flex-1 truncate">{thread.title}</span>
-                {thread.id === runningId && (
+                {runningIds.includes(thread.id) && (
                   <span className="size-1.5 animate-pulse bg-cyan" />
                 )}
               </button>
-              {thread.id !== runningId && (
+              {!runningIds.includes(thread.id) && (
                 <button
                   type="button"
                   onClick={() =>

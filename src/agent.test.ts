@@ -170,15 +170,17 @@ describe('agent:run', () => {
     });
     const sent: unknown[] = [];
     const sender = {
-      id: 1,
       isDestroyed: () => false,
-      send: (_: string, event: unknown) => sent.push(event),
+      once: vi.fn(),
+      off: vi.fn(),
+      send: (_: string, runId: string, event: unknown) =>
+        sent.push([runId, event]),
     };
-    await handlers.get('agent:run')!({ sender }, 'go', '/proj');
+    await handlers.get('agent:run')!({ sender }, 'r1', 'go', '/proj');
     expect(sent).toEqual([
-      { type: 'session', sessionId: 'sid' },
-      { type: 'text', text: 'hi' },
-      { type: 'tool', name: 'Bash', input: { cmd: 'ls' } },
+      ['r1', { type: 'session', sessionId: 'sid' }],
+      ['r1', { type: 'text', text: 'hi' }],
+      ['r1', { type: 'tool', name: 'Bash', input: { cmd: 'ls' } }],
     ]);
   });
 });

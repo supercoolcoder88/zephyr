@@ -1,24 +1,23 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type Ref } from 'react';
 import type { ThreadItem } from '../agent-types';
 import type { Thread } from '../thread';
 
 interface Props {
   thread: Thread;
   running: boolean;
-  // Another thread holds the window's single agent run.
-  busy: boolean;
   justFinished: boolean;
   onSend(prompt: string): void;
   onCancel(): void;
+  composer: Ref<HTMLTextAreaElement>;
 }
 
 export default function ChatThread({
   thread,
   running,
-  busy,
   justFinished,
   onSend,
   onCancel,
+  composer,
 }: Props) {
   const [prompt, setPrompt] = useState('');
   const bottom = useRef<HTMLDivElement>(null);
@@ -29,9 +28,9 @@ export default function ChatThread({
     bottom.current?.scrollIntoView({ block: 'end' });
   }, [items.length]);
 
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!prompt.trim() || running || busy) return;
+  function submit(e?: FormEvent) {
+    e?.preventDefault();
+    if (!prompt.trim() || running) return;
     onSend(prompt);
     setPrompt('');
   }
@@ -80,28 +79,36 @@ export default function ChatThread({
 
       <form
         onSubmit={submit}
-        className={`flex shrink-0 gap-2 border-t border-line bg-panel p-3 ${running ? 'scanline' : ''}`}
+        className={`flex shrink-0 items-end gap-2 border-t border-line bg-panel p-3 ${running ? 'scanline' : ''}`}
       >
-        <input
+        <textarea
+          ref={composer}
+          autoFocus
+          rows={1}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder={busy ? 'Another thread is running…' : 'Ask the agent…'}
-          disabled={busy}
-          className="flex-1 border border-line bg-void px-3 py-2 text-sm outline-none placeholder:text-mute focus:border-line-strong disabled:opacity-50"
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing)
+              return;
+            e.preventDefault();
+            submit();
+          }}
+          placeholder="Ask the agent…"
+          className="max-h-48 min-w-0 flex-1 resize-none border border-line bg-void px-3 py-2 text-sm [field-sizing:content] outline-none placeholder:text-mute focus:border-line-strong"
         />
         {running ? (
           <button
             type="button"
             onClick={onCancel}
-            className="border border-alert px-4 text-2xs tracking-widest text-alert transition-colors duration-150 ease-mech hover:bg-alert hover:text-void"
+            className="h-[38px] border border-alert px-4 text-2xs tracking-widest text-alert transition-colors duration-150 ease-mech hover:bg-alert hover:text-void"
           >
             [ STOP ]
           </button>
         ) : (
           <button
             type="submit"
-            disabled={busy || !prompt.trim()}
-            className="chamfer bg-paper px-4 text-2xs font-medium tracking-widest text-void transition-colors duration-150 ease-mech hover:bg-ink disabled:bg-line-strong disabled:text-mute"
+            disabled={!prompt.trim()}
+            className="chamfer h-[38px] bg-paper px-4 text-2xs font-medium tracking-widest text-void transition-colors duration-150 ease-mech hover:bg-ink disabled:bg-line-strong disabled:text-mute"
           >
             [ SEND ]
           </button>
@@ -127,13 +134,13 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
       return (
         <div className="flex gap-3 border border-line bg-panel px-3 py-2 text-sm">
           <span className="text-mute">&gt;</span>
-          <p className="whitespace-pre-wrap">{item.text}</p>
+          <p className="min-w-0 break-words whitespace-pre-wrap">{item.text}</p>
         </div>
       );
     case 'text':
       return (
         <p
-          className={`border-l pl-3 text-sm whitespace-pre-wrap transition-colors duration-200 ease-mech ${
+          className={`border-l pl-3 text-sm break-words whitespace-pre-wrap transition-colors duration-200 ease-mech ${
             live ? 'border-cyan' : 'border-line'
           }`}
         >
@@ -148,7 +155,7 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
           >
             {item.name}
           </span>
-          <span className="truncate text-mute">
+          <span className="min-w-0 truncate text-mute">
             {JSON.stringify(item.input)}
           </span>
         </div>
@@ -163,6 +170,8 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
         </p>
       );
     case 'error':
-      return <p className="pl-3 text-sm text-alert">{item.message}</p>;
+      return (
+        <p className="pl-3 text-sm break-words text-alert">{item.message}</p>
+      );
   }
 }

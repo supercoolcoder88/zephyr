@@ -11,10 +11,15 @@ export type ThreadItem =
   | { type: 'user'; text: string };
 
 export interface AgentApi {
-  run(prompt: string, cwd: string, resume?: string): Promise<void>;
+  run(
+    runId: string,
+    prompt: string,
+    cwd: string,
+    resume?: string,
+  ): Promise<void>;
   pickWorkspace(): Promise<string | undefined>;
-  cancel(): Promise<void>;
-  onEvent(listener: (event: AgentEvent) => void): () => void;
+  cancel(runId: string): Promise<void>;
+  onEvent(listener: (runId: string, event: AgentEvent) => void): () => void;
   listThreads(
     cwd: string,
   ): Promise<{ id: string; title: string; updatedAt: number }[]>;
