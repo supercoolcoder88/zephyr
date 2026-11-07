@@ -61,26 +61,15 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
         send(target, runId, event);
       }
       break;
-    case 'result': {
-      const usage = Object.values(message.modelUsage);
+    case 'result':
       send(target, runId, {
         type: 'done',
         ok: message.subtype === 'success' && !message.is_error,
         result:
           message.subtype === 'success' ? message.result : message.subtype,
         costUsd: message.total_cost_usd,
-        inputTokens: usage.reduce(
-          (n, u) =>
-            n +
-            u.inputTokens +
-            u.cacheReadInputTokens +
-            u.cacheCreationInputTokens,
-          0,
-        ),
-        outputTokens: usage.reduce((n, u) => n + u.outputTokens, 0),
       });
       break;
-    }
   }
 }
 
