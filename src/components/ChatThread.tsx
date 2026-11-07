@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type Ref } from 'react';
 import Markdown from 'react-markdown';
+import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import type { ThreadItem } from '../agent-types';
 import type { Thread } from '../thread';
@@ -148,6 +149,7 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
         >
           <Markdown
             remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeHighlight]}
             components={{ a: (props) => <a {...props} target="_blank" /> }}
           >
             {item.text}

@@ -192,11 +192,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   ]);
   await act(async () => finishRun());
   expect(agent.listThreads).toHaveBeenCalledTimes(2);
-  expect(sidebarTitles()).toEqual([
-    'Summarised title',
-    'Newest',
-    'Older',
-  ]);
+  expect(sidebarTitles()).toEqual(['Summarised title', 'Newest', 'Older']);
   expect(heading()).toBe('Summarised title');
   expect(screen.getByText('live answer')).toBeInTheDocument();
   expect(screen.getByText(/DONE/)).toBeInTheDocument();

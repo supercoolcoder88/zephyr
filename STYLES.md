@@ -62,6 +62,24 @@ box-shadow:
   0 0 12px -2px var(--color-cyan-deep);
 ```
 
+## Code blocks
+
+Fenced code in agent output is highlighted by `rehype-highlight` and coloured with the user's neovim theme (aether, One Dark palette), the one deliberate exception to monochrome. It looks the same in every app theme, like a fixed neovim window. The `code-*` tokens are for code blocks only; inline code stays monochrome.
+
+| Token          | Value     | Use                                         |
+| -------------- | --------- | ------------------------------------------- |
+| `code-bg`      | `#1C2028` | Block background                            |
+| `code-line`    | `#15181E` | Block border                                |
+| `code-fg`      | `#ABB2BF` | Default text, variables, operators          |
+| `code-punct`   | `#646A75` | Punctuation, tag brackets                   |
+| `code-comment` | `#5C6370` | Comments (italic)                           |
+| `code-purple`  | `#C678DD` | Keywords, escapes                           |
+| `code-green`   | `#98C379` | Strings                                     |
+| `code-yellow`  | `#E5C07B` | Numbers, literals, types and classes (bold) |
+| `code-blue`    | `#61AFEF` | Functions (bold)                            |
+| `code-cyan`    | `#56B6C2` | Built-ins, properties, params, meta, regex  |
+| `code-red`     | `#E06C75` | Tag names                                   |
+
 ## Motion
 
 - Mechanical: `ease-mech` (`cubic-bezier(0.2, 0, 0, 1)`) or `steps()`, 120–200ms.
