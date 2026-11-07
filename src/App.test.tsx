@@ -185,7 +185,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
 
   act(() => emit({ type: 'session', sessionId: 'sid' }));
   act(() => emit({ type: 'text', text: 'live answer' }));
-  act(() => emit({ type: 'done', ok: true, result: 'ok', costUsd: 0.01 }));
+  act(() => emit({ type: 'done', ok: true, result: 'ok' }));
   expect(screen.getByText('live answer')).toBeInTheDocument();
   expect(heading()).toBe('first prompt');
 
@@ -198,7 +198,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   expect(sidebarTitles()).toEqual(['Summarised title', 'Newest', 'Older']);
   expect(heading()).toBe('Summarised title');
   expect(screen.getByText('live answer')).toBeInTheDocument();
-  expect(screen.getByText(/DONE/)).toBeInTheDocument();
+  expect(screen.queryByText(/DONE|\$/)).toBeNull();
   expect(agent.loadThread).not.toHaveBeenCalledWith('sid', '/proj');
 
   await sendPrompt(user, 'second prompt');
@@ -367,7 +367,7 @@ it('orders threads by state and clears outcomes once seen', async () => {
   expect(state(/Oldest/)).toBe('error');
   expect(sidebarTitles()).toEqual(['Oldest', 'Older', 'Newest']);
 
-  act(() => emit({ type: 'done', ok: true, result: 'ok', costUsd: 0 }));
+  act(() => emit({ type: 'done', ok: true, result: 'ok' }));
   await act(async () => finishRun());
   expect(state(/Older/)).toBe('done');
   expect(sidebarTitles()).toEqual(['Oldest', 'Older', 'Newest']);
@@ -394,7 +394,7 @@ async function running() {
 }
 
 const finish = async () => {
-  act(() => emit({ type: 'done', ok: true, result: 'ok', costUsd: 0 }));
+  act(() => emit({ type: 'done', ok: true, result: 'ok' }));
   await act(async () => finishRun());
 };
 
@@ -445,7 +445,7 @@ it('keeps only the final answer once the run finishes', async () => {
   expect(screen.getByText('all good')).toBeInTheDocument();
   expect(screen.queryByText('let me look')).toBeNull();
   expect(screen.queryByText('bash')).toBeNull();
-  expect(screen.getByText(/DONE/)).toBeInTheDocument();
+  expect(screen.queryByText(/DONE|\$/)).toBeNull();
 });
 
 it('keeps text written in response to a subagent', async () => {
@@ -508,4 +508,11 @@ it('renders bold as strong inside markdown', async () => {
   const strong = screen.getByText('loud');
   expect(strong.tagName).toBe('STRONG');
   expect(strong.closest('.markdown')).not.toBeNull();
+});
+
+it('shows a failed run with its reason and no cost', async () => {
+  const user = await open();
+  await sendPrompt(user, 'hi');
+  act(() => emit({ type: 'done', ok: false, result: 'error_max_turns' }));
+  expect(screen.getByText('FAILED · error_max_turns')).toBeInTheDocument();
 });

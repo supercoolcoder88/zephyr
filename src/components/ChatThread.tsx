@@ -211,12 +211,11 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
     }
     case 'done':
       return (
-        <p
-          className={`pl-3 text-2xs tracking-widest ${item.ok ? 'text-mute' : 'text-alert'}`}
-        >
-          {item.ok ? 'DONE' : `FAILED · ${item.result}`} · $
-          {item.costUsd.toFixed(4)}
-        </p>
+        !item.ok && (
+          <p className="pl-3 text-2xs tracking-widest text-alert">
+            FAILED · {item.result}
+          </p>
+        )
       );
     case 'error':
       return (

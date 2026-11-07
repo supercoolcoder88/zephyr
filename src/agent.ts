@@ -67,7 +67,6 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
         ok: message.subtype === 'success' && !message.is_error,
         result:
           message.subtype === 'success' ? message.result : message.subtype,
-        costUsd: message.total_cost_usd,
       });
       break;
   }
