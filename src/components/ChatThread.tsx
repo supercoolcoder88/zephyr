@@ -22,6 +22,7 @@ export default function ChatThread({
   composer,
 }: Props) {
   const [prompt, setPrompt] = useState('');
+  const [expanded, setExpanded] = useState<number[]>([]);
   const bottom = useRef<HTMLDivElement>(null);
   const items = thread.items ?? [];
   const turns = groupTurns(items);
@@ -59,18 +60,47 @@ export default function ChatThread({
           <div className="mx-auto max-w-3xl space-y-6">
             {turns.map((turn, t) => {
               const last = t === turns.length - 1;
+              const collapsed = !(running && last);
+              const lastTool = turn.findLastIndex((i) => i.type === 'tool');
+              let afterAgent = false;
+              const kept = turn.map((item, i) => {
+                if (item.type !== 'tool')
+                  return item.type !== 'text' || i > lastTool || afterAgent;
+                afterAgent = item.name === 'Agent' || item.name === 'Task';
+                return false;
+              });
+              const hidden = collapsed ? kept.filter((k) => !k).length : 0;
+              const open = expanded.includes(t);
               return (
                 <div
                   key={t}
                   className={`space-y-2 ${last && justFinished ? 'flash' : ''}`}
                 >
-                  {turn.map((item, i) => (
-                    <Item
-                      key={i}
-                      item={item}
-                      live={running && last && i === turn.length - 1}
-                    />
-                  ))}
+                  {turn.map(
+                    (item, i) =>
+                      (!hidden || open || kept[i]) && (
+                        <Item
+                          key={i}
+                          item={item}
+                          live={running && last && i === turn.length - 1}
+                        />
+                      ),
+                  )}
+                  {hidden > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpanded(
+                          open
+                            ? expanded.filter((e) => e !== t)
+                            : [...expanded, t],
+                        )
+                      }
+                      className="ml-auto block text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech hover:text-ink"
+                    >
+                      {open ? '[ HIDE ]' : `[ ${hidden} HIDDEN ]`}
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -154,19 +184,29 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
           </Markdown>
         </div>
       );
-    case 'tool':
+    case 'tool': {
+      const input = item.input as Record<string, unknown> | null;
+      const key = [
+        'command',
+        'file_path',
+        'pattern',
+        'description',
+        'url',
+        'query',
+      ].find((k) => typeof input?.[k] === 'string');
       return (
-        <div className="flex items-center gap-3 pl-3 text-2xs">
-          <span
-            className={`shrink-0 bg-paper px-1.5 py-0.5 font-medium tracking-widest text-void uppercase ${live ? 'glow' : ''}`}
-          >
-            {item.name}
+        <p className="flex gap-2 pl-3 text-2xs text-mute">
+          <span className={`shrink-0 ${live ? 'text-cyan' : ''}`}>
+            {item.name.toLowerCase()}
           </span>
-          <span className="min-w-0 truncate text-mute">
-            {JSON.stringify(item.input)}
+          <span className="min-w-0 truncate">
+            {key
+              ? (input![key] as string).split('\n')[0]
+              : JSON.stringify(item.input)}
           </span>
-        </div>
+        </p>
       );
+    }
     case 'done':
       return (
         <p

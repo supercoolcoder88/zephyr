@@ -75,16 +75,20 @@ it('lists sessions on open and loads the newest', async () => {
   agent.loadThread.mockResolvedValue([
     { type: 'user', text: 'old prompt' },
     { type: 'text', text: 'old answer' },
-    { type: 'tool', name: 'Read', input: { path: 'x' } },
+    { type: 'tool', name: 'Read', input: { file_path: 'x.ts' } },
+    { type: 'text', text: 'final answer' },
   ]);
   await open();
   expect(agent.listThreads).toHaveBeenCalledWith('/proj');
   expect(sidebarTitles()).toEqual(['Newest', 'Older']);
   expect(heading()).toBe('Newest');
   expect(agent.loadThread).toHaveBeenCalledWith('b', '/proj');
-  expect(await screen.findByText('old answer')).toBeInTheDocument();
+  expect(await screen.findByText('final answer')).toBeInTheDocument();
   expect(screen.getByText('old prompt')).toBeInTheDocument();
-  expect(screen.getByText('Read')).toBeInTheDocument();
+  expect(screen.getByText('final answer')).toBeInTheDocument();
+  expect(screen.queryByText('old answer')).toBeNull();
+  expect(screen.queryByText('x.ts')).toBeNull();
+  expect(screen.getByRole('button', { name: '[ 2 HIDDEN ]' })).toBeTruthy();
 });
 
 it('shows one empty draft when the project has no sessions', async () => {
@@ -192,11 +196,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   ]);
   await act(async () => finishRun());
   expect(agent.listThreads).toHaveBeenCalledTimes(2);
-  expect(sidebarTitles()).toEqual([
-    'Summarised title',
-    'Newest',
-    'Older',
-  ]);
+  expect(sidebarTitles()).toEqual(['Summarised title', 'Newest', 'Older']);
   expect(heading()).toBe('Summarised title');
   expect(screen.getByText('live answer')).toBeInTheDocument();
   expect(screen.getByText(/DONE/)).toBeInTheDocument();
@@ -386,4 +386,127 @@ it('puts a new thread above running threads', async () => {
   await sendPrompt(user, 'go');
   await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
   expect(sidebarTitles()).toEqual(['New thread', 'Older', 'Newest']);
+});
+
+async function running() {
+  const user = await open();
+  await sendPrompt(user, 'go');
+  return user;
+}
+
+const finish = async () => {
+  act(() => emit({ type: 'done', ok: true, result: 'ok', costUsd: 0 }));
+  await act(async () => finishRun());
+};
+
+it('shows a tool call as one quiet line', async () => {
+  await running();
+  act(() =>
+    emit({ type: 'tool', name: 'Bash', input: { command: 'npm test\nmore' } }),
+  );
+  const line = screen.getByText('bash').parentElement!;
+  expect(line).toHaveTextContent('npm test');
+  expect(line.textContent).not.toMatch(/[{}]|more/);
+});
+
+it.each([
+  ['Read', { file_path: '/src/a.ts' }, 'read', '/src/a.ts'],
+  ['Grep', { pattern: 'foo.*bar' }, 'grep', 'foo.*bar'],
+  [
+    'Agent',
+    { description: 'Find usages', prompt: 'long' },
+    'agent',
+    'Find usages',
+  ],
+  ['Mystery', { x: 1 }, 'mystery', '{"x":1}'],
+])('summarises %s input', async (name, input, label, summary) => {
+  await running();
+  act(() => emit({ type: 'tool', name, input }));
+  expect(screen.getByText(label).parentElement).toHaveTextContent(summary);
+});
+
+const steps: AgentEvent[] = [
+  { type: 'text', text: 'let me look' },
+  { type: 'tool', name: 'Bash', input: { command: 'ls' } },
+  { type: 'text', text: 'all good' },
+];
+
+it('shows every step while running', async () => {
+  await running();
+  for (const e of steps) act(() => emit(e));
+  expect(screen.getByText('let me look')).toBeInTheDocument();
+  expect(screen.getByText('bash')).toBeInTheDocument();
+  expect(screen.getByText('all good')).toBeInTheDocument();
+});
+
+it('keeps only the final answer once the run finishes', async () => {
+  await running();
+  for (const e of steps) act(() => emit(e));
+  await finish();
+  expect(screen.getByText('all good')).toBeInTheDocument();
+  expect(screen.queryByText('let me look')).toBeNull();
+  expect(screen.queryByText('bash')).toBeNull();
+  expect(screen.getByText(/DONE/)).toBeInTheDocument();
+});
+
+it('keeps text written in response to a subagent', async () => {
+  await running();
+  for (const e of [
+    { type: 'tool', name: 'Agent', input: { description: 'explore' } },
+    { type: 'text', text: 'subagent says hi' },
+    { type: 'tool', name: 'Read', input: { file_path: 'a' } },
+    { type: 'text', text: 'after read' },
+    { type: 'tool', name: 'Task', input: { description: 'older' } },
+    { type: 'text', text: 'task says hi' },
+    { type: 'tool', name: 'Bash', input: { command: 'ls' } },
+    { type: 'text', text: 'final' },
+  ] as AgentEvent[])
+    act(() => emit(e));
+  await finish();
+  expect(screen.getByText('subagent says hi')).toBeInTheDocument();
+  expect(screen.getByText('task says hi')).toBeInTheDocument();
+  expect(screen.getByText('final')).toBeInTheDocument();
+  expect(screen.queryByText('after read')).toBeNull();
+  expect(screen.queryByText('agent')).toBeNull();
+});
+
+it('toggles hidden items in a finished turn', async () => {
+  const user = await running();
+  for (const e of steps) act(() => emit(e));
+  await finish();
+  await user.click(screen.getByRole('button', { name: '[ 2 HIDDEN ]' }));
+  expect(screen.getByText('let me look')).toBeInTheDocument();
+  expect(screen.getByText('bash')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '[ HIDE ]' }));
+  expect(screen.queryByText('let me look')).toBeNull();
+  expect(screen.queryByText('bash')).toBeNull();
+});
+
+it('shows no toggle when nothing is hidden', async () => {
+  await running();
+  act(() => emit({ type: 'text', text: 'just an answer' }));
+  await finish();
+  expect(screen.getByText('just an answer')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /HIDDEN/ })).toBeNull();
+});
+
+it('keeps errors visible in a finished turn', async () => {
+  await running();
+  for (const e of [
+    ...steps,
+    { type: 'error', message: 'exploded' },
+    { type: 'tool', name: 'Bash', input: { command: 'ls' } },
+  ] as AgentEvent[])
+    act(() => emit(e));
+  await finish();
+  expect(screen.getByText('exploded')).toBeInTheDocument();
+  expect(screen.queryByText('bash')).toBeNull();
+});
+
+it('renders bold as strong inside markdown', async () => {
+  await running();
+  act(() => emit({ type: 'text', text: 'this is **loud**' }));
+  const strong = screen.getByText('loud');
+  expect(strong.tagName).toBe('STRONG');
+  expect(strong.closest('.markdown')).not.toBeNull();
 });

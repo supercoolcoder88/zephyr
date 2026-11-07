@@ -12,6 +12,7 @@
   --color-paper: #fff;
   --color-cyan: #00e5ff;
   --color-cyan-deep: #0066ff;
+  --color-blue: #61afef;
   --color-alert: #ff2e4d;
   --color-ok: #00e676;
   --color-warn: #ff9100;
@@ -38,6 +39,7 @@
   --color-paper: #000;
   --color-cyan: #00a8cc;
   --color-cyan-deep: #0066ff;
+  --color-blue: #0b6bcb;
   --color-alert: #e0193a;
   --color-ok: #00a152;
   --color-warn: #e06c00;
@@ -53,6 +55,7 @@
   --color-paper: #fff;
   --color-cyan: #00e5ff;
   --color-cyan-deep: #2f6bff;
+  --color-blue: #61afef;
   --color-alert: #ff2e4d;
   --color-ok: #00e676;
   --color-warn: #ff9100;
@@ -158,6 +161,7 @@
   }
   & strong {
     font-weight: 600;
+    color: var(--color-blue);
   }
   & a {
     text-decoration: underline;

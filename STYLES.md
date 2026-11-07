@@ -19,6 +19,7 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 | `paper`       | `#FFFFFF` | Inverted blocks, primary button                |
 | `cyan`        | `#00E5FF` | Key moments only                               |
 | `cyan-deep`   | `#0066FF` | Glow falloff behind cyan                       |
+| `blue`        | `#61AFEF` | Bold text in agent output only                 |
 | `alert`       | `#FF2E4D` | Errors and destructive actions, just as sparse |
 | `ok`          | `#00E676` | Thread status dot: finished, unseen            |
 | `warn`        | `#FF9100` | Thread status dot: needs attention             |
@@ -46,13 +47,13 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 
 ## Key moments (the only places cyan appears)
 
-| Moment           | Treatment                                                                 |
-| ---------------- | ------------------------------------------------------------------------- |
-| Agent running    | Cyan scanline sweeps the composer's top edge; status word turns cyan      |
-| Streaming output | Newest agent line gets a cyan left rule; it drops to `line` once stale    |
-| Tool in flight   | Tool name in an inverted block with a cyan outline until the run moves on |
-| Run completes    | One `.flash` glow pulse (~400ms) on the finished turn, then monochrome    |
-| Keyboard focus   | 1px cyan outline (`focus-visible` only)                                   |
+| Moment           | Treatment                                                                |
+| ---------------- | ------------------------------------------------------------------------ |
+| Agent running    | Cyan scanline sweeps the composer's top edge; status word turns cyan     |
+| Streaming output | Newest agent line gets a cyan left rule; it drops to `line` once stale   |
+| Tool in flight   | Tool name in its one-line mute summary turns cyan until the run moves on |
+| Run completes    | One `.flash` glow pulse (~400ms) on the finished turn, then monochrome   |
+| Keyboard focus   | 1px cyan outline (`focus-visible` only)                                  |
 
 Glow, for key moments only:
 
