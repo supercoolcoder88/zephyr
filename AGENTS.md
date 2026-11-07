@@ -1,5 +1,10 @@
 zephyr is an early-stage agent orchestration tool currently only supporting claude code via Claude Agent SDK and Claude subscription.
 
+# Glossary
+
+- **Thread**: a Claude session in a workspace, shown as one chat in the sidebar.
+- **Subthread**: a subagent spawned inside a thread, listed in the sidebar box below the threads.
+
 # Programming guide
 
 - Reduce the number of comments made

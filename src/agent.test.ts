@@ -155,7 +155,7 @@ describe('threads:delete', () => {
 });
 
 describe('agent:run', () => {
-  it('still forwards live assistant blocks as events', async () => {
+  it('forwards main-thread blocks and subagent traffic as subthreads', async () => {
     sdk.query.mockImplementation(async function* () {
       yield { type: 'system', subtype: 'init', session_id: 'sid' };
       yield {
@@ -166,6 +166,31 @@ describe('agent:run', () => {
             { type: 'tool_use', id: 't', name: 'Bash', input: { cmd: 'ls' } },
           ],
         },
+      };
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_type: 'local_bash',
+        tool_use_id: 'b',
+        description: 'shell',
+      };
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_type: 'local_agent',
+        tool_use_id: 't',
+        description: 'count files',
+      };
+      yield {
+        type: 'assistant',
+        parent_tool_use_id: 't',
+        message: { content: [{ type: 'text', text: 'from subagent' }] },
+      };
+      yield {
+        type: 'system',
+        subtype: 'task_notification',
+        tool_use_id: 't',
+        status: 'completed',
       };
     });
     const sent: unknown[] = [];
@@ -181,6 +206,16 @@ describe('agent:run', () => {
       ['r1', { type: 'session', sessionId: 'sid' }],
       ['r1', { type: 'text', text: 'hi' }],
       ['r1', { type: 'tool', name: 'Bash', input: { cmd: 'ls' } }],
+      ['r1', { type: 'subthread', id: 't', title: 'count files' }],
+      [
+        'r1',
+        {
+          type: 'subthread-output',
+          id: 't',
+          output: { type: 'text', text: 'from subagent' },
+        },
+      ],
+      ['r1', { type: 'subthread-end', id: 't', ok: true }],
     ]);
   });
 });

@@ -7,6 +7,7 @@ const agent: AgentApi = {
   run: (runId, prompt, cwd, resume) =>
     ipcRenderer.invoke('agent:run', runId, prompt, cwd, resume),
   pickWorkspace: () => ipcRenderer.invoke('workspace:pick'),
+  commands: (cwd) => ipcRenderer.invoke('agent:commands', cwd),
   cancel: (runId) => ipcRenderer.invoke('agent:cancel', runId),
   listThreads: (cwd) => ipcRenderer.invoke('threads:list', cwd),
   loadThread: (sessionId, cwd) =>

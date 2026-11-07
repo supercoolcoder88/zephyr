@@ -1,4 +1,4 @@
-import type { ThreadItem } from './agent-types';
+import type { Subthread, ThreadItem } from './agent-types';
 
 export type ThreadState = 'attention' | 'error' | 'done' | 'running' | 'read';
 
@@ -11,6 +11,8 @@ export interface Thread {
   status?: 'attention' | 'error' | 'done';
   // Undefined until the session transcript is loaded.
   items?: ThreadItem[];
+  // Subagents spawned by runs since the thread was opened.
+  subthreads?: Subthread[];
   // Not yet a Claude session; id is temporary until the first run's session event.
   draft?: true;
   // Original draft id, kept as the React key so promotion doesn't remount.

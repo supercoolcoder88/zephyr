@@ -28,6 +28,7 @@ function merge(
         updatedAt,
         status: known?.status,
         items: known?.items,
+        subthreads: known?.subthreads,
         key: known?.key,
       };
     }),
@@ -62,6 +63,36 @@ export default function App() {
         if (event.type === 'done' || event.type === 'error') {
           const status = event.type === 'done' && event.ok ? 'done' : 'error';
           patch(run.id, (t) => ({ ...t, status, updatedAt: Date.now() }));
+        }
+        if (event.type === 'subthread') {
+          const { id, title } = event;
+          return patch(run.id, (t) => ({
+            ...t,
+            subthreads: [
+              ...(t.subthreads ?? []),
+              { id, title, items: [], state: 'running' },
+            ],
+          }));
+        }
+        if (event.type === 'subthread-output') {
+          return patch(run.id, (t) => ({
+            ...t,
+            subthreads: t.subthreads?.map((s) =>
+              s.id === event.id
+                ? { ...s, items: [...s.items, event.output] }
+                : s,
+            ),
+          }));
+        }
+        if (event.type === 'subthread-end') {
+          return patch(run.id, (t) => ({
+            ...t,
+            subthreads: t.subthreads?.map((s) =>
+              s.id === event.id
+                ? { ...s, state: event.ok ? 'done' : 'error' }
+                : s,
+            ),
+          }));
         }
         if (event.type !== 'session') return append(run.id, event);
         if (!run.draft) return;
@@ -108,6 +139,13 @@ export default function App() {
     } finally {
       const finished = runs.current.get(runId)!.id;
       runs.current.delete(runId);
+      // A cancelled run never reports its subagents ending.
+      patch(finished, (t) => ({
+        ...t,
+        subthreads: t.subthreads?.map((s) =>
+          s.state === 'running' ? { ...s, state: 'read' } : s,
+        ),
+      }));
       setFinishedId(finished);
       setRunningIds((prev) => prev.filter((t) => t !== finished));
     }
@@ -224,7 +262,7 @@ export default function App() {
   }
 
   return (
-    <main className="flex h-screen bg-void text-ink">
+    <main className="flex h-screen overflow-hidden bg-void text-ink">
       <Sidebar
         workspace={active.cwd}
         onOpenWorkspace={openWorkspace}
@@ -235,6 +273,7 @@ export default function App() {
         onNew={create}
         onDelete={remove}
         error={deleteError}
+        subthreads={active.subthreads ?? []}
       />
       <ChatThread
         key={active.key ?? active.id}

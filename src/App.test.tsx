@@ -19,6 +19,7 @@ const agent = {
   listThreads: vi.fn(),
   loadThread: vi.fn(),
   deleteThread: vi.fn(),
+  commands: vi.fn(),
 };
 
 beforeEach(() => {
@@ -27,6 +28,10 @@ beforeEach(() => {
   agent.listThreads.mockResolvedValue([]);
   agent.loadThread.mockResolvedValue([]);
   agent.deleteThread.mockResolvedValue(undefined);
+  agent.commands.mockResolvedValue([
+    { name: 'compact', description: 'Summarize', argumentHint: '' },
+    { name: 'review', description: 'Review a PR', argumentHint: '<pr>' },
+  ]);
   agent.run.mockImplementation(
     (runId: string) =>
       new Promise<void>((resolve) => finishers.set(runId, resolve)),
@@ -192,11 +197,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   ]);
   await act(async () => finishRun());
   expect(agent.listThreads).toHaveBeenCalledTimes(2);
-  expect(sidebarTitles()).toEqual([
-    'Summarised title',
-    'Newest',
-    'Older',
-  ]);
+  expect(sidebarTitles()).toEqual(['Summarised title', 'Newest', 'Older']);
   expect(heading()).toBe('Summarised title');
   expect(screen.getByText('live answer')).toBeInTheDocument();
   expect(screen.getByText(/DONE/)).toBeInTheDocument();
@@ -386,4 +387,65 @@ it('puts a new thread above running threads', async () => {
   await sendPrompt(user, 'go');
   await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
   expect(sidebarTitles()).toEqual(['New thread', 'Older', 'Newest']);
+});
+
+it('runs a slash command picked from the menu', async () => {
+  const user = await open();
+  const box = screen.getByPlaceholderText('Ask the agent…');
+  await user.type(box, '/');
+  expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+    '/compactSummarize',
+    '/review <pr>Review a PR',
+  ]);
+  await user.type(box, 'co{Enter}');
+  expect(agent.run).toHaveBeenCalledWith(
+    expect.any(String),
+    '/compact',
+    '/proj',
+    undefined,
+  );
+});
+
+it('completes slash commands that take arguments', async () => {
+  const user = await open();
+  const box = screen.getByPlaceholderText('Ask the agent…');
+  await user.type(box, '/{ArrowDown}{Enter}');
+  expect(box).toHaveValue('/review ');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(agent.run).not.toHaveBeenCalled();
+
+  await user.clear(box);
+  await user.type(box, '/{Escape}');
+  expect(screen.queryByRole('listbox')).toBeNull();
+});
+
+it('shows subthreads in the sidebar and hides them once all are done', async () => {
+  const user = await open();
+  await sendPrompt(user, 'go');
+  const toggle = () => screen.getByRole('button', { name: /SUBTHREADS/ });
+  act(() => emit({ type: 'subthread', id: 't1', title: 'count files' }));
+  act(() =>
+    emit({
+      type: 'subthread-output',
+      id: 't1',
+      output: { type: 'text', text: 'counting now' },
+    }),
+  );
+  expect(toggle()).toHaveTextContent('[ HIDE SUBTHREADS ]');
+  const sub = screen.getByRole('button', { name: /count files/ });
+  expect(within(sub).getByLabelText('running')).toBeInTheDocument();
+
+  await user.click(sub);
+  expect(screen.getByText('counting now')).toBeInTheDocument();
+
+  act(() => emit({ type: 'subthread-end', id: 't1', ok: true }));
+  expect(toggle()).toHaveTextContent('[ SHOW SUBTHREADS ]');
+  expect(screen.queryByRole('button', { name: /count files/ })).toBeNull();
+
+  await user.click(toggle());
+  expect(
+    within(screen.getByRole('button', { name: /count files/ })).getByLabelText(
+      'done',
+    ),
+  ).toBeInTheDocument();
 });

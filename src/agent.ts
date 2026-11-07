@@ -7,10 +7,17 @@ import {
 } from 'electron';
 import path from 'node:path';
 import type {
+  Options,
   SDKAssistantMessage,
   SDKMessage,
+  SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentEvent, ThreadItem } from './agent-types';
+import type {
+  AgentEvent,
+  Output,
+  SlashCommand,
+  ThreadItem,
+} from './agent-types';
 
 // The SDK is ESM-only and spawns a native Claude Code binary, so it stays
 // external to the Vite bundle and is loaded lazily on first use.
@@ -29,6 +36,20 @@ function packagedClaudeBinary() {
   );
 }
 
+function options(cwd: string): Options {
+  return {
+    pathToClaudeCodeExecutable: packagedClaudeBinary(),
+    model: 'claude-opus-5-5',
+    cwd,
+    tools: { type: 'preset', preset: 'claude_code' },
+    systemPrompt: { type: 'preset', preset: 'claude_code' },
+    settingSources: ['user', 'project', 'local'],
+    skills: 'all',
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+  };
+}
+
 // Keyed by a renderer-chosen run id so each thread can cancel its own run.
 const runs = new Map<string, AbortController>();
 
@@ -39,13 +60,12 @@ function send(target: WebContents, runId: string, event: AgentEvent) {
 type AssistantContent = SDKAssistantMessage['message']['content'];
 
 function blockEvents(content: AssistantContent) {
-  return content.flatMap(
-    (block): Extract<AgentEvent, { type: 'text' | 'tool' }>[] =>
-      block.type === 'text'
-        ? [{ type: 'text', text: block.text }]
-        : block.type === 'tool_use'
-          ? [{ type: 'tool', name: block.name, input: block.input }]
-          : [],
+  return content.flatMap((block): Output[] =>
+    block.type === 'text'
+      ? [{ type: 'text', text: block.text }]
+      : block.type === 'tool_use'
+        ? [{ type: 'tool', name: block.name, input: block.input }]
+        : [],
   );
 }
 
@@ -54,13 +74,38 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
     case 'system':
       if (message.subtype === 'init') {
         send(target, runId, { type: 'session', sessionId: message.session_id });
+      } else if (
+        message.subtype === 'task_started' &&
+        message.task_type === 'local_agent' &&
+        message.tool_use_id
+      ) {
+        send(target, runId, {
+          type: 'subthread',
+          id: message.tool_use_id,
+          title: message.description,
+        });
+      } else if (
+        message.subtype === 'task_notification' &&
+        message.tool_use_id
+      ) {
+        send(target, runId, {
+          type: 'subthread-end',
+          id: message.tool_use_id,
+          ok: message.status === 'completed',
+        });
       }
       break;
-    case 'assistant':
-      for (const event of blockEvents(message.message.content)) {
-        send(target, runId, event);
+    case 'assistant': {
+      const id = message.parent_tool_use_id;
+      for (const output of blockEvents(message.message.content)) {
+        send(
+          target,
+          runId,
+          id ? { type: 'subthread-output', id, output } : output,
+        );
       }
       break;
+    }
     case 'result':
       send(target, runId, {
         type: 'done',
@@ -93,19 +138,7 @@ export function registerAgentIpc() {
         const { query } = await loadSdk();
         for await (const message of query({
           prompt,
-          options: {
-            abortController,
-            resume,
-            pathToClaudeCodeExecutable: packagedClaudeBinary(),
-            model: 'claude-opus-5-5',
-            cwd,
-            tools: { type: 'preset', preset: 'claude_code' },
-            systemPrompt: { type: 'preset', preset: 'claude_code' },
-            settingSources: ['user', 'project', 'local'],
-            skills: 'all',
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-          },
+          options: { ...options(cwd), abortController, resume },
         })) {
           forward(target, runId, message);
         }
@@ -179,6 +212,32 @@ export function registerAgentIpc() {
           throw err;
         }
       });
+    },
+  );
+
+  // Commands only come from a live CLI, so start one that never gets a prompt.
+  ipcMain.handle(
+    'agent:commands',
+    async (_, cwd: string): Promise<SlashCommand[]> => {
+      const { query } = await loadSdk();
+      const idle = query({
+        prompt: {
+          [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+        } as AsyncIterable<SDKUserMessage>,
+        options: options(cwd),
+      });
+      try {
+        const commands = await idle.supportedCommands();
+        return commands
+          .map(({ name, description, argumentHint }) => ({
+            name,
+            description,
+            argumentHint,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+      } finally {
+        idle.close();
+      }
     },
   );
 

@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState, type FormEvent, type Ref } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type Ref,
+} from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { ThreadItem } from '../agent-types';
+import type { SlashCommand, ThreadItem } from '../agent-types';
 import type { Thread } from '../thread';
+
+// Listing commands spawns a CLI, so do it once per workspace.
+const commandLists = new Map<string, Promise<SlashCommand[]>>();
 
 interface Props {
   thread: Thread;
@@ -22,23 +32,79 @@ export default function ChatThread({
   composer,
 }: Props) {
   const [prompt, setPrompt] = useState('');
-  const bottom = useRef<HTMLDivElement>(null);
+  const [commands, setCommands] = useState<SlashCommand[]>([]);
+  const [selected, setSelected] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const scroller = useRef<HTMLDivElement>(null);
+  // Follow new output only while the user is at the bottom.
+  const pinned = useRef(true);
+  const menu = useRef<HTMLUListElement>(null);
   const items = thread.items ?? [];
   const turns = groupTurns(items);
 
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ block: 'end' });
+  const typed = /^\/(\S*)$/.exec(prompt)?.[1].toLowerCase();
+  const matches =
+    typed === undefined || dismissed
+      ? []
+      : [
+          ...commands.filter((c) => c.name.toLowerCase().startsWith(typed)),
+          ...commands.filter(
+            (c) =>
+              !c.name.toLowerCase().startsWith(typed) &&
+              c.name.toLowerCase().includes(typed),
+          ),
+        ];
+  const highlighted = Math.min(selected, matches.length - 1);
+
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [items.length]);
+
+  useEffect(() => {
+    let list = commandLists.get(thread.cwd);
+    if (!list) {
+      list = window.agent.commands(thread.cwd);
+      commandLists.set(thread.cwd, list);
+      list.catch(() => commandLists.delete(thread.cwd));
+    }
+    let live = true;
+    list.then((c) => live && setCommands(c)).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [thread.cwd]);
+
+  useEffect(() => {
+    menu.current?.children[highlighted]?.scrollIntoView({ block: 'nearest' });
+  }, [highlighted]);
+
+  function edit(text: string) {
+    setPrompt(text);
+    setSelected(0);
+    setDismissed(false);
+  }
+
+  function send(text: string) {
+    if (!text.trim() || running) return;
+    onSend(text);
+    pinned.current = true;
+    edit('');
+  }
 
   function submit(e?: FormEvent) {
     e?.preventDefault();
-    if (!prompt.trim() || running) return;
-    onSend(prompt);
-    setPrompt('');
+    send(prompt);
+  }
+
+  // Commands that take arguments are completed; the rest run straight away.
+  function pick(command: SlashCommand, run: boolean) {
+    if (run && !command.argumentHint) return send(`/${command.name}`);
+    edit(`/${command.name} `);
   }
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-6">
         <h1 className="truncate text-2xs tracking-widest uppercase">
           {thread.title}
@@ -50,7 +116,15 @@ export default function ChatThread({
         </span>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <div
+        ref={scroller}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          pinned.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+        }}
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6"
+      >
         {turns.length === 0 ? (
           <p className="pt-24 text-center text-2xs tracking-widest text-mute">
             NO MESSAGES YET
@@ -76,22 +150,65 @@ export default function ChatThread({
             })}
           </div>
         )}
-        <div ref={bottom} />
       </div>
 
       <form
         onSubmit={submit}
-        className={`flex shrink-0 items-end gap-2 border-t border-line bg-panel p-3 ${running ? 'scanline' : ''}`}
+        className={`relative flex shrink-0 items-end gap-2 border-t border-line bg-panel p-3 ${running ? 'scanline' : ''}`}
       >
+        {matches.length > 0 && (
+          <ul
+            ref={menu}
+            role="listbox"
+            className="absolute right-0 bottom-full left-0 max-h-64 overflow-y-auto border-t border-line bg-panel py-1"
+          >
+            {matches.map((c, i) => (
+              <li
+                key={c.name}
+                role="option"
+                aria-selected={i === highlighted}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setSelected(i)}
+                onClick={() => pick(c, true)}
+                className={`flex cursor-pointer gap-3 px-3 py-1 text-sm ${
+                  i === highlighted ? 'bg-paper text-void' : ''
+                }`}
+              >
+                <span className="shrink-0">
+                  /{c.name}
+                  {c.argumentHint && (
+                    <span className="text-mute"> {c.argumentHint}</span>
+                  )}
+                </span>
+                <span className="min-w-0 truncate text-mute">
+                  {c.description}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
         <textarea
           ref={composer}
           autoFocus
           rows={1}
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={(e) => edit(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing)
-              return;
+            if (e.nativeEvent.isComposing) return;
+            if (matches.length > 0) {
+              const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+              if (step) {
+                e.preventDefault();
+                const n = matches.length;
+                return setSelected((highlighted + step + n) % n);
+              }
+              if (e.key === 'Escape') return setDismissed(true);
+              if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                e.preventDefault();
+                return pick(matches[highlighted], e.key === 'Enter');
+              }
+            }
+            if (e.key !== 'Enter' || e.shiftKey) return;
             e.preventDefault();
             submit();
           }}
@@ -158,7 +275,7 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
       return (
         <div className="flex items-center gap-3 pl-3 text-2xs">
           <span
-            className={`shrink-0 bg-paper px-1.5 py-0.5 font-medium tracking-widest text-void uppercase ${live ? 'glow' : ''}`}
+            className={`max-w-1/2 shrink-0 truncate bg-paper px-1.5 py-0.5 font-medium tracking-widest text-void uppercase ${live ? 'glow' : ''}`}
           >
             {item.name}
           </span>
