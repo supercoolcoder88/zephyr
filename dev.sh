@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ./dev.sh          launch the stable build (installs it first if missing)
-# ./dev.sh install  rebuild and replace the stable build
+# ./dev.sh          rebuild, replace the stable build, then launch it
+# ./dev.sh install  rebuild and replace the stable build without launching
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -27,10 +27,7 @@ install() {
 case "${1:-}" in
   install) install ;;
   "")
-    if [ ! -x "$dest/zephyr" ]; then
-      log "No stable build found, installing"
-      install
-    fi
+    install
     log "Launching $dest/zephyr"
     setsid "$dest/zephyr" >/dev/null 2>&1 &
     ;;
