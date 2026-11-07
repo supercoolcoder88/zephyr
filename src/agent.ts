@@ -1,4 +1,10 @@
-import { app, ipcMain, type WebContents } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  type WebContents,
+} from 'electron';
 import path from 'node:path';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentEvent } from './agent-types';
@@ -58,7 +64,7 @@ function forward(target: WebContents, message: SDKMessage) {
 export function registerAgentIpc() {
   ipcMain.handle(
     'agent:run',
-    async (ipcEvent, prompt: string, resume?: string) => {
+    async (ipcEvent, prompt: string, cwd: string, resume?: string) => {
       const target = ipcEvent.sender;
       runs.get(target.id)?.abort();
       const abortController = new AbortController();
@@ -73,11 +79,13 @@ export function registerAgentIpc() {
             resume,
             pathToClaudeCodeExecutable: packagedClaudeBinary(),
             model: 'claude-opus-5-5',
-            cwd: process.cwd(),
-            // Read-only by default: anything outside this list is denied
-            // without prompting. Widen this deliberately.
-            allowedTools: ['Read', 'Glob', 'Grep'],
-            permissionMode: 'dontAsk',
+            cwd,
+            tools: { type: 'preset', preset: 'claude_code' },
+            systemPrompt: { type: 'preset', preset: 'claude_code' },
+            settingSources: ['user', 'project', 'local'],
+            skills: 'all',
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
           },
         })) {
           forward(target, message);
@@ -94,6 +102,14 @@ export function registerAgentIpc() {
       }
     },
   );
+
+  ipcMain.handle('workspace:pick', async (ipcEvent) => {
+    const { filePaths } = await dialog.showOpenDialog(
+      BrowserWindow.fromWebContents(ipcEvent.sender)!,
+      { properties: ['openDirectory'] },
+    );
+    return filePaths[0];
+  });
 
   ipcMain.handle('agent:cancel', (ipcEvent) => {
     runs.get(ipcEvent.sender.id)?.abort();

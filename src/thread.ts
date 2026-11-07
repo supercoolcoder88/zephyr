@@ -7,10 +7,11 @@ export type ThreadItem =
 export interface Thread {
   id: string;
   title: string;
+  cwd: string;
   sessionId?: string;
   items: ThreadItem[];
 }
 
-export function newThread(): Thread {
-  return { id: crypto.randomUUID(), title: 'New thread', items: [] };
+export function newThread(cwd: string): Thread {
+  return { id: crypto.randomUUID(), title: 'New thread', cwd, items: [] };
 }

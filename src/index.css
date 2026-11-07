@@ -26,6 +26,19 @@
   --ease-mech: cubic-bezier(0.2, 0, 0, 1);
 }
 
+:root[data-theme='light'] {
+  --color-void: #fff;
+  --color-panel: #f5f5f5;
+  --color-line: #e0e0e0;
+  --color-line-strong: #c4c4c4;
+  --color-mute: #858585;
+  --color-ink: #121212;
+  --color-paper: #000;
+  --color-cyan: #00a8cc;
+  --color-cyan-deep: #0066ff;
+  --color-alert: #e0193a;
+}
+
 @layer base {
   html,
   body {

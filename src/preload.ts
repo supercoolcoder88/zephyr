@@ -4,7 +4,9 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { AgentApi, AgentEvent } from './agent-types';
 
 const agent: AgentApi = {
-  run: (prompt, resume) => ipcRenderer.invoke('agent:run', prompt, resume),
+  run: (prompt, cwd, resume) =>
+    ipcRenderer.invoke('agent:run', prompt, cwd, resume),
+  pickWorkspace: () => ipcRenderer.invoke('workspace:pick'),
   cancel: () => ipcRenderer.invoke('agent:cancel'),
   onEvent: (listener) => {
     const handler = (_: IpcRendererEvent, event: AgentEvent) => listener(event);

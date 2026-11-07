@@ -7,7 +7,8 @@ export type AgentEvent =
   | { type: 'error'; message: string };
 
 export interface AgentApi {
-  run(prompt: string, resume?: string): Promise<void>;
+  run(prompt: string, cwd: string, resume?: string): Promise<void>;
+  pickWorkspace(): Promise<string | undefined>;
   cancel(): Promise<void>;
   onEvent(listener: (event: AgentEvent) => void): () => void;
 }

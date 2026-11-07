@@ -4,8 +4,9 @@ import Sidebar from './components/Sidebar';
 import { newThread, type Thread, type ThreadItem } from './thread';
 
 export default function App() {
-  const [threads, setThreads] = useState<Thread[]>(() => [newThread()]);
-  const [activeId, setActiveId] = useState(threads[0].id);
+  const [workspace, setWorkspace] = useState<string>();
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [activeId, setActiveId] = useState<string>();
   const [runningId, setRunningId] = useState<string>();
   const [finishedId, setFinishedId] = useState<string>();
   // Agent events carry no thread id; they belong to whichever thread started the run.
@@ -33,9 +34,11 @@ export default function App() {
     [],
   );
 
-  const active = threads.find((t) => t.id === activeId) ?? threads[0];
+  const visible = threads.filter((t) => t.cwd === workspace);
+  const active = visible.find((t) => t.id === activeId) ?? visible[0];
 
   async function send(prompt: string) {
+    if (!active) return;
     const id = active.id;
     patch(id, (t) => ({
       ...t,
@@ -47,7 +50,7 @@ export default function App() {
     setFinishedId(undefined);
     try {
       // Passing the thread's session id continues the same conversation.
-      await window.agent.run(prompt, active.sessionId);
+      await window.agent.run(prompt, active.cwd, active.sessionId);
     } finally {
       runningRef.current = undefined;
       setRunningId(undefined);
@@ -61,17 +64,46 @@ export default function App() {
   }
 
   function create() {
-    const empty = threads.find((t) => t.items.length === 0);
+    if (!workspace) return;
+    const empty = visible.find((t) => t.items.length === 0);
     if (empty) return select(empty.id);
-    const thread = newThread();
+    const thread = newThread(workspace);
     setThreads((prev) => [...prev, thread]);
     select(thread.id);
+  }
+
+  async function openWorkspace() {
+    const cwd = await window.agent.pickWorkspace();
+    if (!cwd || cwd === workspace) return;
+    setWorkspace(cwd);
+    const existing = threads.find((t) => t.cwd === cwd);
+    if (existing) return select(existing.id);
+    const thread = newThread(cwd);
+    setThreads((prev) => [...prev, thread]);
+    select(thread.id);
+  }
+
+  if (!active) {
+    return (
+      <main className="flex h-screen flex-col items-center justify-center gap-8 bg-void text-ink">
+        <h1 className="text-5xl font-medium tracking-[0.3em]">ZEPHYR</h1>
+        <button
+          type="button"
+          onClick={openWorkspace}
+          className="chamfer bg-paper px-6 py-3 text-2xs tracking-widest text-void transition-opacity duration-150 ease-mech hover:opacity-80"
+        >
+          [ OPEN PROJECT ]
+        </button>
+      </main>
+    );
   }
 
   return (
     <main className="flex h-screen bg-void text-ink">
       <Sidebar
-        threads={threads}
+        workspace={active.cwd}
+        onOpenWorkspace={openWorkspace}
+        threads={visible}
         activeId={active.id}
         runningId={runningId}
         onSelect={select}

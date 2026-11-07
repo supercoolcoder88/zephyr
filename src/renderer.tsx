@@ -7,6 +7,9 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
 
+document.documentElement.dataset.theme =
+  localStorage.getItem('theme') ?? 'dark';
+
 const container = document.getElementById('root');
 if (!container) throw new Error('Root element #root not found');
 
