@@ -19,6 +19,7 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 | `paper`       | `#FFFFFF` | Inverted blocks, primary button                |
 | `cyan`        | `#00E5FF` | Key moments only                               |
 | `cyan-deep`   | `#0066FF` | Glow falloff behind cyan                       |
+| `blue`        | `#61AFEF` | Bold text in agent output only                 |
 | `alert`       | `#FF2E4D` | Errors and destructive actions, just as sparse |
 | `ok`          | `#00E676` | Thread status dot: finished, unseen            |
 | `warn`        | `#FF9100` | Thread status dot: needs attention             |
@@ -46,13 +47,13 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 
 ## Key moments (the only places cyan appears)
 
-| Moment           | Treatment                                                                 |
-| ---------------- | ------------------------------------------------------------------------- |
-| Agent running    | Cyan scanline sweeps the composer's top edge; status word turns cyan      |
-| Streaming output | Newest agent line gets a cyan left rule; it drops to `line` once stale    |
-| Tool in flight   | Tool name in an inverted block with a cyan outline until the run moves on |
-| Run completes    | One `.flash` glow pulse (~400ms) on the finished turn, then monochrome    |
-| Keyboard focus   | 1px cyan outline (`focus-visible` only)                                   |
+| Moment           | Treatment                                                                |
+| ---------------- | ------------------------------------------------------------------------ |
+| Agent running    | Cyan scanline sweeps the composer's top edge; status word turns cyan     |
+| Streaming output | Newest agent line gets a cyan left rule; it drops to `line` once stale   |
+| Tool in flight   | Tool name in its one-line mute summary turns cyan until the run moves on |
+| Run completes    | One `.flash` glow pulse (~400ms) on the finished turn, then monochrome   |
+| Keyboard focus   | 1px cyan outline (`focus-visible` only)                                  |
 
 Glow, for key moments only:
 
@@ -61,6 +62,24 @@ box-shadow:
   0 0 0 1px var(--color-cyan),
   0 0 12px -2px var(--color-cyan-deep);
 ```
+
+## Code blocks
+
+Fenced code in agent output is highlighted by `rehype-highlight` and coloured with the user's neovim theme (aether, One Dark palette), the one deliberate exception to monochrome. It looks the same in every app theme, like a fixed neovim window. The `code-*` tokens are for code blocks only; inline code stays monochrome.
+
+| Token          | Value     | Use                                         |
+| -------------- | --------- | ------------------------------------------- |
+| `code-bg`      | `#1C2028` | Block background                            |
+| `code-line`    | `#15181E` | Block border                                |
+| `code-fg`      | `#ABB2BF` | Default text, variables, operators          |
+| `code-punct`   | `#646A75` | Punctuation, tag brackets                   |
+| `code-comment` | `#5C6370` | Comments (italic)                           |
+| `code-purple`  | `#C678DD` | Keywords, escapes                           |
+| `code-green`   | `#98C379` | Strings                                     |
+| `code-yellow`  | `#E5C07B` | Numbers, literals, types and classes (bold) |
+| `code-blue`    | `#61AFEF` | Functions (bold)                            |
+| `code-cyan`    | `#56B6C2` | Built-ins, properties, params, meta, regex  |
+| `code-red`     | `#E06C75` | Tag names                                   |
 
 ## Motion
 

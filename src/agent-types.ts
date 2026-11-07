@@ -7,7 +7,7 @@ export type Output =
 export type AgentEvent =
   | { type: 'session'; sessionId: string }
   | Output
-  | { type: 'done'; ok: boolean; result: string; costUsd: number }
+  | { type: 'done'; ok: boolean; result: string }
   | { type: 'error'; message: string }
   | { type: 'subthread'; id: string; title: string }
   | { type: 'subthread-output'; id: string; output: Output }

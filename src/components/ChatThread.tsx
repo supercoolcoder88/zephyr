@@ -7,6 +7,7 @@ import {
   type Ref,
 } from 'react';
 import Markdown from 'react-markdown';
+import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import type { SlashCommand, ThreadItem } from '../agent-types';
 import type { Thread } from '../thread';
@@ -39,6 +40,7 @@ export default function ChatThread({
   // Follow new output only while the user is at the bottom.
   const pinned = useRef(true);
   const menu = useRef<HTMLUListElement>(null);
+  const [expanded, setExpanded] = useState<number[]>([]);
   const items = thread.items ?? [];
   const turns = groupTurns(items);
 
@@ -133,18 +135,47 @@ export default function ChatThread({
           <div className="mx-auto max-w-3xl space-y-6">
             {turns.map((turn, t) => {
               const last = t === turns.length - 1;
+              const collapsed = !(running && last);
+              const lastTool = turn.findLastIndex((i) => i.type === 'tool');
+              let afterAgent = false;
+              const kept = turn.map((item, i) => {
+                if (item.type !== 'tool')
+                  return item.type !== 'text' || i > lastTool || afterAgent;
+                afterAgent = item.name === 'Agent' || item.name === 'Task';
+                return false;
+              });
+              const hidden = collapsed ? kept.filter((k) => !k).length : 0;
+              const open = expanded.includes(t);
               return (
                 <div
                   key={t}
                   className={`space-y-2 ${last && justFinished ? 'flash' : ''}`}
                 >
-                  {turn.map((item, i) => (
-                    <Item
-                      key={i}
-                      item={item}
-                      live={running && last && i === turn.length - 1}
-                    />
-                  ))}
+                  {turn.map(
+                    (item, i) =>
+                      (!hidden || open || kept[i]) && (
+                        <Item
+                          key={i}
+                          item={item}
+                          live={running && last && i === turn.length - 1}
+                        />
+                      ),
+                  )}
+                  {hidden > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpanded(
+                          open
+                            ? expanded.filter((e) => e !== t)
+                            : [...expanded, t],
+                        )
+                      }
+                      className="ml-auto block text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech hover:text-ink"
+                    >
+                      {open ? '[ HIDE ]' : `[ ${hidden} HIDDEN ]`}
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -265,33 +296,43 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
         >
           <Markdown
             remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeHighlight]}
             components={{ a: (props) => <a {...props} target="_blank" /> }}
           >
             {item.text}
           </Markdown>
         </div>
       );
-    case 'tool':
+    case 'tool': {
+      const input = item.input as Record<string, unknown> | null;
+      const summary = [
+        'command',
+        'file_path',
+        'pattern',
+        'description',
+        'url',
+        'query',
+      ]
+        .map((k) => input?.[k])
+        .find((v): v is string => typeof v === 'string');
       return (
-        <div className="flex items-center gap-3 pl-3 text-2xs">
-          <span
-            className={`max-w-1/2 shrink-0 truncate bg-paper px-1.5 py-0.5 font-medium tracking-widest text-void uppercase ${live ? 'glow' : ''}`}
-          >
-            {item.name}
+        <p className="flex gap-2 pl-3 text-2xs text-mute">
+          <span className={`shrink-0 ${live ? 'text-cyan' : ''}`}>
+            {item.name.toLowerCase()}
           </span>
-          <span className="min-w-0 truncate text-mute">
-            {JSON.stringify(item.input)}
+          <span className="min-w-0 truncate">
+            {summary?.split('\n')[0] ?? JSON.stringify(item.input)}
           </span>
-        </div>
+        </p>
       );
+    }
     case 'done':
       return (
-        <p
-          className={`pl-3 text-2xs tracking-widest ${item.ok ? 'text-mute' : 'text-alert'}`}
-        >
-          {item.ok ? 'DONE' : `FAILED · ${item.result}`} · $
-          {item.costUsd.toFixed(4)}
-        </p>
+        !item.ok && (
+          <p className="pl-3 text-2xs tracking-widest text-alert">
+            FAILED · {item.result}
+          </p>
+        )
       );
     case 'error':
       return (
