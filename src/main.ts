@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, Menu, shell } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { registerAgentIpc } from './agent';
@@ -32,14 +32,25 @@ const createWindow = () => {
     );
   }
 
-  // Open the DevTools.
-  mainWindow.webContents.openDevTools();
+  // Pinch and ctrl+wheel zoom bypass the menu, so clamp them here.
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
+  mainWindow.webContents.on('zoom-changed', () =>
+    mainWindow.webContents.setZoomLevel(0),
+  );
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (!app.isPackaged && input.type === 'keyDown' && input.key === 'F12') {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
 };
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // The default menu carries Chromium's zoom, reload and devtools accelerators.
+  Menu.setApplicationMenu(null);
   registerAgentIpc();
   createWindow();
 
