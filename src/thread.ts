@@ -27,8 +27,10 @@ export function threadState(thread: Thread, runningIds: string[]): ThreadState {
 export function sortThreads(threads: Thread[], runningIds: string[]) {
   return threads.toSorted(
     (a, b) =>
+      Number(!!b.draft) - Number(!!a.draft) ||
       order.indexOf(threadState(a, runningIds)) -
-        order.indexOf(threadState(b, runningIds)) || b.updatedAt - a.updatedAt,
+        order.indexOf(threadState(b, runningIds)) ||
+      b.updatedAt - a.updatedAt,
   );
 }
 

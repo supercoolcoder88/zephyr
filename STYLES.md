@@ -23,7 +23,7 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 | `ok`          | `#00E676` | Thread status dot: finished, unseen            |
 | `warn`        | `#FF9100` | Thread status dot: needs attention             |
 
-- Light mode (`<html data-theme="light">`) redefines these tokens in `src/index.css`; components never branch on theme.
+- Light (`<html data-theme="light">`) and cyber (`data-theme="cyber"`, dark navy with white text) modes redefine these tokens in `src/index.css`; components never branch on theme.
 - Thread status dots in the sidebar are the only place `ok` and `warn` appear: cyan running, `alert` error, `ok` done, `warn` needs attention, `mute` read.
 - Emphasis is done by **inversion** (`bg-paper text-void`), not by adding colour.
 - Never set long text in cyan. Cyan marks things like rules, outlines, cursors and short status words.

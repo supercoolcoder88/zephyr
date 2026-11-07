@@ -21,6 +21,12 @@ interface Props {
   error?: string;
 }
 
+const nextTheme: Record<string, string> = {
+  dark: 'cyber',
+  cyber: 'light',
+  light: 'dark',
+};
+
 export default function Sidebar({
   workspace,
   onOpenWorkspace,
@@ -36,7 +42,7 @@ export default function Sidebar({
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
 
   function toggleTheme() {
-    const next = theme === 'light' ? 'dark' : 'light';
+    const next = nextTheme[theme ?? 'dark'];
     document.documentElement.dataset.theme = next;
     localStorage.setItem('theme', next);
     setTheme(next);
@@ -69,7 +75,7 @@ export default function Sidebar({
         </span>
       </button>
       <nav className="flex-1 overflow-y-auto py-2">
-        {threads.map((thread, i) => {
+        {threads.map((thread) => {
           const active = thread.id === activeId;
           const confirming = confirmId === thread.id;
           return (
@@ -89,11 +95,6 @@ export default function Sidebar({
                 onClick={() => onSelect(thread.id)}
                 className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-4 text-left text-sm"
               >
-                <span
-                  className={`text-2xs ${active ? 'text-void/50' : 'text-mute'}`}
-                >
-                  {String(i + 1).padStart(2, '0')}
-                </span>
                 <span className="flex-1 truncate">{thread.title}</span>
                 <span
                   aria-label={threadState(thread, runningIds)}
@@ -124,7 +125,7 @@ export default function Sidebar({
         <button
           type="button"
           onClick={toggleTheme}
-          aria-label={theme === 'light' ? 'Dark mode' : 'Light mode'}
+          aria-label={`${nextTheme[theme ?? 'dark']} mode`}
           className="text-mute transition-colors duration-150 ease-mech hover:text-ink"
         >
           <svg
@@ -137,6 +138,8 @@ export default function Sidebar({
           >
             {theme === 'light' ? (
               <path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5Z" />
+            ) : theme === 'dark' ? (
+              <path d="M8 2 14.5 13.5h-13Z" />
             ) : (
               <>
                 <rect x="5" y="5" width="6" height="6" />

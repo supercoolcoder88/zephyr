@@ -43,6 +43,21 @@
   --color-warn: #e06c00;
 }
 
+:root[data-theme='cyber'] {
+  --color-void: #050b1f;
+  --color-panel: #0a1430;
+  --color-line: #16264f;
+  --color-line-strong: #2b4482;
+  --color-mute: #7289bd;
+  --color-ink: #f2f6ff;
+  --color-paper: #fff;
+  --color-cyan: #00e5ff;
+  --color-cyan-deep: #2f6bff;
+  --color-alert: #ff2e4d;
+  --color-ok: #00e676;
+  --color-warn: #ff9100;
+}
+
 @layer base {
   html,
   body {

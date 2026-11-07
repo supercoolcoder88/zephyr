@@ -79,7 +79,7 @@ it('lists sessions on open and loads the newest', async () => {
   ]);
   await open();
   expect(agent.listThreads).toHaveBeenCalledWith('/proj');
-  expect(sidebarTitles()).toEqual(['01Newest', '02Older']);
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
   expect(heading()).toBe('Newest');
   expect(agent.loadThread).toHaveBeenCalledWith('b', '/proj');
   expect(await screen.findByText('old answer')).toBeInTheDocument();
@@ -89,7 +89,7 @@ it('lists sessions on open and loads the newest', async () => {
 
 it('shows one empty draft when the project has no sessions', async () => {
   await open();
-  expect(sidebarTitles()).toEqual(['01New thread']);
+  expect(sidebarTitles()).toEqual(['New thread']);
   expect(screen.getByText('NO MESSAGES YET')).toBeInTheDocument();
   expect(agent.loadThread).not.toHaveBeenCalled();
 });
@@ -193,9 +193,9 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   await act(async () => finishRun());
   expect(agent.listThreads).toHaveBeenCalledTimes(2);
   expect(sidebarTitles()).toEqual([
-    '01Summarised title',
-    '02Newest',
-    '03Older',
+    'Summarised title',
+    'Newest',
+    'Older',
   ]);
   expect(heading()).toBe('Summarised title');
   expect(screen.getByText('live answer')).toBeInTheDocument();
@@ -253,10 +253,10 @@ it('asks for confirmation before deleting', async () => {
   const user = await open();
   await user.click(row(/Older/).getByRole('button', { name: '[ DEL ]' }));
   expect(agent.deleteThread).not.toHaveBeenCalled();
-  expect(sidebarTitles()).toEqual(['01Newest', '02Older']);
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
   await user.click(row(/Older/).getByRole('button', { name: '[ CONFIRM ]' }));
   expect(agent.deleteThread).toHaveBeenCalledWith('a', '/proj');
-  expect(sidebarTitles()).toEqual(['01Newest']);
+  expect(sidebarTitles()).toEqual(['Newest']);
   expect(heading()).toBe('Newest');
 });
 
@@ -295,10 +295,10 @@ it('removes a draft without touching the sessions', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
   await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
-  expect(sidebarTitles()).toEqual(['01New thread', '02Newest', '03Older']);
+  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
   await remove(user, /New thread/);
   expect(agent.deleteThread).not.toHaveBeenCalled();
-  expect(sidebarTitles()).toEqual(['01Newest', '02Older']);
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
   expect(heading()).toBe('Newest');
 });
 
@@ -320,7 +320,7 @@ it('leaves a fresh draft after deleting the last thread', async () => {
   agent.listThreads.mockResolvedValue([list[1]]);
   const user = await open();
   await remove(user, /Older/);
-  expect(sidebarTitles()).toEqual(['01New thread']);
+  expect(sidebarTitles()).toEqual(['New thread']);
   expect(heading()).toBe('New thread');
   expect(screen.getByText('NO MESSAGES YET')).toBeInTheDocument();
 });
@@ -330,7 +330,7 @@ it('keeps the active thread when deleting another', async () => {
   const user = await open();
   await user.click(screen.getByRole('button', { name: /Older/ }));
   await remove(user, /Newest/);
-  expect(sidebarTitles()).toEqual(['01Older']);
+  expect(sidebarTitles()).toEqual(['Older']);
   expect(heading()).toBe('Older');
 });
 
@@ -340,7 +340,7 @@ it('keeps the row and shows the error when deleting fails', async () => {
   const user = await open();
   await remove(user, /Older/);
   expect(await screen.findByText('permission denied')).toBeInTheDocument();
-  expect(sidebarTitles()).toEqual(['01Newest', '02Older']);
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
   await user.click(screen.getByRole('button', { name: /Older/ }));
   expect(screen.queryByText('permission denied')).toBeNull();
 });
@@ -359,22 +359,31 @@ it('orders threads by state and clears outcomes once seen', async () => {
   await sendPrompt(user, 'go');
   const runC = lastRunId();
   expect(state(/Oldest/)).toBe('running');
-  expect(sidebarTitles()).toEqual(['01Oldest', '02Newest', '03Older']);
+  expect(sidebarTitles()).toEqual(['Oldest', 'Newest', 'Older']);
 
   await user.click(screen.getByRole('button', { name: /Older/ }));
   await sendPrompt(user, 'go');
   act(() => emit({ type: 'error', message: 'boom' }, runC));
   await act(async () => finishRun(runC));
   expect(state(/Oldest/)).toBe('error');
-  expect(sidebarTitles()).toEqual(['01Oldest', '02Older', '03Newest']);
+  expect(sidebarTitles()).toEqual(['Oldest', 'Older', 'Newest']);
 
   act(() => emit({ type: 'done', ok: true, result: 'ok', costUsd: 0 }));
   await act(async () => finishRun());
   expect(state(/Older/)).toBe('done');
-  expect(sidebarTitles()).toEqual(['01Oldest', '02Older', '03Newest']);
+  expect(sidebarTitles()).toEqual(['Oldest', 'Older', 'Newest']);
 
   await user.click(screen.getByRole('button', { name: /Oldest/ }));
   expect(state(/Oldest/)).toBe('read');
   expect(state(/Older/)).toBe('read');
-  expect(sidebarTitles()).toEqual(['01Newest', '02Older', '03Oldest']);
+  expect(sidebarTitles()).toEqual(['Newest', 'Older', 'Oldest']);
+});
+
+it('puts a new thread above running threads', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  await sendPrompt(user, 'go');
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  expect(sidebarTitles()).toEqual(['New thread', 'Older', 'Newest']);
 });
