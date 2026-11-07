@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type Ref } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { ThreadItem } from '../agent-types';
 import type { Thread } from '../thread';
 
@@ -139,13 +141,18 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
       );
     case 'text':
       return (
-        <p
-          className={`border-l pl-3 text-sm break-words whitespace-pre-wrap transition-colors duration-200 ease-mech ${
+        <div
+          className={`markdown border-l pl-3 text-sm break-words transition-colors duration-200 ease-mech ${
             live ? 'border-cyan' : 'border-line'
           }`}
         >
-          {item.text}
-        </p>
+          <Markdown
+            remarkPlugins={[remarkGfm]}
+            components={{ a: (props) => <a {...props} target="_blank" /> }}
+          >
+            {item.text}
+          </Markdown>
+        </div>
       );
     case 'tool':
       return (

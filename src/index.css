@@ -13,6 +13,8 @@
   --color-cyan: #00e5ff;
   --color-cyan-deep: #0066ff;
   --color-alert: #ff2e4d;
+  --color-ok: #00e676;
+  --color-warn: #ff9100;
 
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
   --font-sans: var(--font-mono);
@@ -37,6 +39,8 @@
   --color-cyan: #00a8cc;
   --color-cyan-deep: #0066ff;
   --color-alert: #e0193a;
+  --color-ok: #00a152;
+  --color-warn: #e06c00;
 }
 
 @layer base {
@@ -117,5 +121,86 @@
     box-shadow:
       0 0 0 1px transparent,
       0 0 0 0 transparent;
+  }
+}
+
+/* Agent markdown output. */
+@utility markdown {
+  & > * + * {
+    margin-top: 8px;
+  }
+  & :is(h1, h2, h3, h4, h5, h6) {
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  & :is(h1, h2) {
+    font-size: var(--text-base);
+    margin-top: 16px;
+  }
+  & :is(h1, h2, h3, h4, h5, h6):first-child {
+    margin-top: 0;
+  }
+  & strong {
+    font-weight: 600;
+  }
+  & a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  & a:hover {
+    color: var(--color-paper);
+  }
+  & :is(ul, ol) {
+    padding-left: 20px;
+  }
+  & ul {
+    list-style: square;
+  }
+  & ol {
+    list-style: decimal;
+  }
+  & li::marker {
+    color: var(--color-mute);
+  }
+  & li + li,
+  & li > :is(ul, ol) {
+    margin-top: 4px;
+  }
+  & :not(pre) > code {
+    background: var(--color-panel);
+    border: 1px solid var(--color-line);
+    padding: 0 4px;
+  }
+  & pre {
+    background: var(--color-panel);
+    border: 1px solid var(--color-line);
+    padding: 8px 12px;
+    overflow-x: auto;
+  }
+  & blockquote {
+    border-left: 1px solid var(--color-line-strong);
+    padding-left: 12px;
+    color: var(--color-mute);
+  }
+  & hr {
+    border-color: var(--color-line);
+  }
+  & table {
+    border-collapse: collapse;
+    display: block;
+    overflow-x: auto;
+  }
+  & :is(th, td) {
+    border: 1px solid var(--color-line);
+    padding: 4px 8px;
+    text-align: left;
+  }
+  & th {
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-mute);
   }
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { registerAgentIpc } from './agent';
@@ -16,6 +16,11 @@ const createWindow = () => {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   // and load the index.html of the app.

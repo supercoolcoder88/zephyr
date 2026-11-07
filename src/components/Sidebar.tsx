@@ -1,5 +1,13 @@
 import { useState } from 'react';
-import type { Thread } from '../thread';
+import { threadState, type Thread, type ThreadState } from '../thread';
+
+const dot: Record<ThreadState, string> = {
+  attention: 'bg-warn',
+  error: 'bg-alert',
+  done: 'bg-ok',
+  running: 'animate-pulse bg-cyan',
+  read: 'bg-mute',
+};
 
 interface Props {
   workspace: string;
@@ -87,9 +95,10 @@ export default function Sidebar({
                   {String(i + 1).padStart(2, '0')}
                 </span>
                 <span className="flex-1 truncate">{thread.title}</span>
-                {runningIds.includes(thread.id) && (
-                  <span className="size-1.5 animate-pulse bg-cyan" />
-                )}
+                <span
+                  aria-label={threadState(thread, runningIds)}
+                  className={`size-1.5 shrink-0 ${dot[threadState(thread, runningIds)]}`}
+                />
               </button>
               {!runningIds.includes(thread.id) && (
                 <button

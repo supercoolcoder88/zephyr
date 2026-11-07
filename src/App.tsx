@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import ChatThread from './components/ChatThread';
 import Sidebar from './components/Sidebar';
 import type { ThreadItem } from './agent-types';
-import { newThread, type Thread } from './thread';
+import { newThread, sortThreads, type Thread } from './thread';
 
 type Listed = Awaited<ReturnType<typeof window.agent.listThreads>>;
 
@@ -19,9 +19,17 @@ function merge(
       (t) =>
         (t.draft || running.includes(t.id)) && !list.some((l) => l.id === t.id),
     ),
-    ...list.map(({ id, title }) => {
+    ...list.map(({ id, title, updatedAt }) => {
       const known = mine.find((t) => t.id === id);
-      return { id, title, cwd, items: known?.items, key: known?.key };
+      return {
+        id,
+        title,
+        cwd,
+        updatedAt,
+        status: known?.status,
+        items: known?.items,
+        key: known?.key,
+      };
     }),
   ];
 }
@@ -51,6 +59,10 @@ export default function App() {
       window.agent.onEvent((runId, event) => {
         const run = runs.current.get(runId);
         if (!run) return;
+        if (event.type === 'done' || event.type === 'error') {
+          const status = event.type === 'done' && event.ok ? 'done' : 'error';
+          patch(run.id, (t) => ({ ...t, status, updatedAt: Date.now() }));
+        }
         if (event.type !== 'session') return append(run.id, event);
         if (!run.draft) return;
         // A draft becomes a real thread once Claude assigns its session id.
@@ -70,7 +82,10 @@ export default function App() {
     [],
   );
 
-  const visible = threads.filter((t) => t.cwd === workspace);
+  const visible = sortThreads(
+    threads.filter((t) => t.cwd === workspace),
+    runningIds,
+  );
   const active = visible.find((t) => t.id === activeId) ?? visible[0];
 
   async function send(prompt: string) {
@@ -80,6 +95,8 @@ export default function App() {
     patch(id, (t) => ({
       ...t,
       title: t.draft && t.items?.length === 0 ? prompt.slice(0, 48) : t.title,
+      status: undefined,
+      updatedAt: Date.now(),
       items: [...(t.items ?? []), { type: 'user', text: prompt }],
     }));
     const runId = crypto.randomUUID();
@@ -107,6 +124,14 @@ export default function App() {
   }
 
   function select(thread: Thread) {
+    // Leaving or opening a thread marks its outcome as seen.
+    setThreads((prev) =>
+      prev.map((t) =>
+        t.id === thread.id || t.id === active?.id
+          ? { ...t, status: undefined }
+          : t,
+      ),
+    );
     setActiveId(thread.id);
     setFinishedId(undefined);
     setDeleteError(undefined);

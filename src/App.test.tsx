@@ -344,3 +344,37 @@ it('keeps the row and shows the error when deleting fails', async () => {
   await user.click(screen.getByRole('button', { name: /Older/ }));
   expect(screen.queryByText('permission denied')).toBeNull();
 });
+
+it('orders threads by state and clears outcomes once seen', async () => {
+  agent.listThreads.mockResolvedValue([
+    ...list,
+    { id: 'c', title: 'Oldest', updatedAt: 0 },
+  ]);
+  const user = await open();
+  const state = (title: RegExp) =>
+    row(title).getByLabelText(/^(attention|error|done|running|read)$/)
+      .ariaLabel;
+
+  await user.click(screen.getByRole('button', { name: /Oldest/ }));
+  await sendPrompt(user, 'go');
+  const runC = lastRunId();
+  expect(state(/Oldest/)).toBe('running');
+  expect(sidebarTitles()).toEqual(['01Oldest', '02Newest', '03Older']);
+
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  await sendPrompt(user, 'go');
+  act(() => emit({ type: 'error', message: 'boom' }, runC));
+  await act(async () => finishRun(runC));
+  expect(state(/Oldest/)).toBe('error');
+  expect(sidebarTitles()).toEqual(['01Oldest', '02Older', '03Newest']);
+
+  act(() => emit({ type: 'done', ok: true, result: 'ok', costUsd: 0 }));
+  await act(async () => finishRun());
+  expect(state(/Older/)).toBe('done');
+  expect(sidebarTitles()).toEqual(['01Oldest', '02Older', '03Newest']);
+
+  await user.click(screen.getByRole('button', { name: /Oldest/ }));
+  expect(state(/Oldest/)).toBe('read');
+  expect(state(/Older/)).toBe('read');
+  expect(sidebarTitles()).toEqual(['01Newest', '02Older', '03Oldest']);
+});
