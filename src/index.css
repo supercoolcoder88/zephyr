@@ -97,12 +97,6 @@
   }
 }
 
-@utility glow {
-  box-shadow:
-    0 0 0 1px var(--color-cyan),
-    0 0 12px -2px var(--color-cyan-deep);
-}
-
 @utility chamfer {
   clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
 }

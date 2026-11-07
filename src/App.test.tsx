@@ -85,7 +85,6 @@ it('lists sessions on open and loads the newest', async () => {
   expect(agent.loadThread).toHaveBeenCalledWith('b', '/proj');
   expect(await screen.findByText('final answer')).toBeInTheDocument();
   expect(screen.getByText('old prompt')).toBeInTheDocument();
-  expect(screen.getByText('final answer')).toBeInTheDocument();
   expect(screen.queryByText('old answer')).toBeNull();
   expect(screen.queryByText('x.ts')).toBeNull();
   expect(screen.getByRole('button', { name: '[ 2 HIDDEN ]' })).toBeTruthy();

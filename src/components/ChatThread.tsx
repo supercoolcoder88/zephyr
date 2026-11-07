@@ -188,23 +188,23 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
       );
     case 'tool': {
       const input = item.input as Record<string, unknown> | null;
-      const key = [
+      const summary = [
         'command',
         'file_path',
         'pattern',
         'description',
         'url',
         'query',
-      ].find((k) => typeof input?.[k] === 'string');
+      ]
+        .map((k) => input?.[k])
+        .find((v): v is string => typeof v === 'string');
       return (
         <p className="flex gap-2 pl-3 text-2xs text-mute">
           <span className={`shrink-0 ${live ? 'text-cyan' : ''}`}>
             {item.name.toLowerCase()}
           </span>
           <span className="min-w-0 truncate">
-            {key
-              ? (input![key] as string).split('\n')[0]
-              : JSON.stringify(item.input)}
+            {summary?.split('\n')[0] ?? JSON.stringify(item.input)}
           </span>
         </p>
       );
