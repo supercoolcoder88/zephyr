@@ -50,7 +50,7 @@ export default function App() {
   const [runningIds, setRunningIds] = useState<string[]>([]);
   const [finishedId, setFinishedId] = useState<string>();
   const [deleteError, setDeleteError] = useState<string>();
-  const [dragging, setDragging] = useState<boolean | 'over'>(false);
+  const [dragging, setDragging] = useState<boolean | 'new' | 'chat'>(false);
   const [permission, setPermission] = useState(
     () => (localStorage.getItem('mode') ?? 'auto') as Permission,
   );
@@ -356,6 +356,11 @@ export default function App() {
       ? e.dataTransfer.getData('text/plain')
       : undefined;
 
+  function caretToEnd(text: string) {
+    composer.current?.focus();
+    composer.current?.setSelectionRange(text.length, text.length);
+  }
+
   async function remove(id: string) {
     const thread = visible.find((t) => t.id === id)!;
     if (runningIds.includes(id)) return;
@@ -448,19 +453,20 @@ export default function App() {
       />
       {dragging && (
         <div
-          data-over={dragging === 'over' || undefined}
+          data-over={dragging === 'new' || undefined}
           onDragOver={(e) => {
             if (!e.dataTransfer.types.includes(todoType)) return;
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
-            setDragging('over');
+            setDragging('new');
           }}
           onDragLeave={() => setDragging(true)}
           onDrop={(e) => {
             const text = todoText(e);
             if (text === undefined) return;
             e.preventDefault();
-            create(text);
+            flushSync(() => create(text));
+            caretToEnd(text);
           }}
           className="absolute inset-y-0 left-0 z-10 flex w-60 items-center justify-center border border-line-strong bg-panel text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech data-over:bg-paper data-over:text-void"
         >
@@ -473,7 +479,12 @@ export default function App() {
             if (!e.dataTransfer.types.includes(todoType)) return;
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
+            setDragging('chat');
           }}
+          onDragLeave={(e) =>
+            !e.currentTarget.contains(e.relatedTarget as Node) &&
+            setDragging((d) => d && true)
+          }
           onDrop={(e) => {
             const text = todoText(e);
             if (text === undefined) return;
@@ -481,11 +492,20 @@ export default function App() {
             const prompt = active.prompt?.trimEnd();
             const next = prompt ? `${prompt}\n${text}` : text;
             flushSync(() => patch(active.id, (t) => ({ ...t, prompt: next })));
-            composer.current?.focus();
-            composer.current?.setSelectionRange(next.length, next.length);
+            caretToEnd(next);
           }}
-          className="flex min-w-0 flex-1"
+          className="relative flex min-w-0 flex-1"
         >
+          {dragging && (
+            <div
+              data-over={dragging === 'chat' || undefined}
+              className="group pointer-events-none absolute inset-2 z-10 flex items-center justify-center border border-line-strong transition-colors duration-150 ease-mech data-over:border-ink"
+            >
+              <span className="border border-line-strong bg-panel px-3 py-1 text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech group-data-over:border-paper group-data-over:bg-paper group-data-over:text-void">
+                [ + ADD TO PROMPT ]
+              </span>
+            </div>
+          )}
           <ChatThread
             key={active.key ?? active.id}
             thread={active}

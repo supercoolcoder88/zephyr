@@ -50,7 +50,7 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 - Dense spacing on a 4px base. This is a tool, not a landing page.
 - A chamfered corner (`.chamfer`) is allowed on at most one primary element per view.
 - Icons come from `lucide-react` at 14px with a 1.5 stroke, `strokeLinecap="square"` and `strokeLinejoin="miter"`. Use one only where a glyph reads better than a bracketed label (panel toggle, drag grip).
-- Drag and drop: a drop zone is a 1px `border-line-strong` box on `bg-panel` with a bracketed label, inverted while dragged over. An insertion point is a 1px `bg-ink` line, and the dragged source dims to `opacity-50`.
+- Drag and drop: a drop zone is a 1px `border-line-strong` box on `bg-panel` with a bracketed label, inverted while dragged over. A drop target over existing content (the chat) is a 1px `border-line-strong` frame inset by 8px with the same label centred; the frame turns `ink` and the label inverts while dragged over. An insertion point is a 1px `bg-ink` line, and the dragged source dims to `opacity-50`.
 
 ## Component architecture
 

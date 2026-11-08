@@ -1689,9 +1689,11 @@ it('starts a new thread from a todo dropped on the new thread zone', async () =>
   fireEvent.drop(zone()!, { dataTransfer });
   expect(zone()).toBeNull();
   expect(sidebarTitles()).toEqual(['New thread', 'New thread']);
-  const box = screen.getByPlaceholderText('Ask the agent…');
+  const box =
+    screen.getByPlaceholderText<HTMLTextAreaElement>('Ask the agent…');
   expect(box).toHaveValue('ship');
   expect(box).toHaveFocus();
+  expect([box.selectionStart, box.selectionEnd]).toEqual([4, 4]);
 });
 
 it('fills the empty draft from a todo dropped on the new thread zone', async () => {
@@ -1700,7 +1702,29 @@ it('fills the empty draft from a todo dropped on the new thread zone', async () 
   fireEvent.dragStart(todoRow('ship'), { dataTransfer });
   fireEvent.drop(screen.getByText('[ + NEW THREAD ]'), { dataTransfer });
   expect(sidebarTitles()).toEqual(['New thread']);
-  const box = screen.getByPlaceholderText('Ask the agent…');
+  const box =
+    screen.getByPlaceholderText<HTMLTextAreaElement>('Ask the agent…');
   expect(box).toHaveValue('ship');
   expect(box).toHaveFocus();
+  expect([box.selectionStart, box.selectionEnd]).toEqual([4, 4]);
+});
+
+it('marks the chat as a drop target while a todo is dragged', async () => {
+  await openWithTodos([{ line: 0, text: 'ship', done: false }]);
+  const target = () =>
+    screen.queryByText('[ + ADD TO PROMPT ]')?.parentElement ?? null;
+  expect(target()).toBeNull();
+  const dataTransfer = transfer();
+  fireEvent.dragStart(todoRow('ship'), { dataTransfer });
+  expect(target()).toBeInTheDocument();
+  expect(target()).not.toHaveAttribute('data-over');
+  const box = screen.getByPlaceholderText('Ask the agent…');
+  fireEvent.dragOver(box, { dataTransfer });
+  expect(target()).toHaveAttribute('data-over');
+  fireEvent.dragOver(screen.getByText('[ + NEW THREAD ]'), { dataTransfer });
+  expect(target()).not.toHaveAttribute('data-over');
+  fireEvent.dragOver(box, { dataTransfer });
+  fireEvent.drop(box, { dataTransfer });
+  expect(target()).toBeNull();
+  expect(box).toHaveValue('ship');
 });
