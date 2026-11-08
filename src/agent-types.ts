@@ -1,7 +1,7 @@
 // Shared between main, preload and renderer. Keep it free of runtime imports.
 export type Output =
   | { type: 'text'; text: string }
-  | { type: 'tool'; name: string; input: unknown };
+  | { type: 'tool'; id: string; name: string; input: unknown };
 
 // Subthread events are keyed by the tool_use id of the call that spawned the subagent.
 export type AgentEvent =
@@ -9,13 +9,46 @@ export type AgentEvent =
   | Output
   | { type: 'done'; ok: boolean; result: string }
   | { type: 'error'; message: string }
+  | { type: 'state'; state: 'running' | 'idle' | 'requires_action' }
+  // The CLI started on these sent messages; ids are the uuids passed to send.
+  | { type: 'picked'; ids: string[] }
+  // The session's process is gone; the next send starts a new one.
+  | { type: 'end' }
   | { type: 'subthread'; id: string; title: string }
   | { type: 'subthread-output'; id: string; output: Output }
-  | { type: 'subthread-end'; id: string; ok: boolean };
+  | { type: 'subthread-end'; id: string; ok: boolean }
+  | { type: 'permission'; request: PermissionRequest }
+  | { type: 'permission-end'; id: string };
+
+export type Permission = 'ask' | 'auto';
+
+export interface PermissionRequest {
+  id: string;
+  tool: string;
+  input: unknown;
+  title?: string;
+}
+
+export interface Image {
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+  // Base64 without the data URL prefix.
+  data: string;
+}
 
 export type ThreadItem =
-  | Exclude<AgentEvent, { type: 'session' | `subthread${string}` }>
-  | { type: 'user'; text: string };
+  | Exclude<
+      AgentEvent,
+      {
+        type:
+          | 'session'
+          | 'state'
+          | 'picked'
+          | 'end'
+          | `subthread${string}`
+          | `permission${string}`;
+      }
+    >
+  | { type: 'user'; text: string; images?: Image[] };
 
 export interface Subthread {
   id: string;
@@ -55,16 +88,29 @@ export interface ModelChoice {
 }
 
 export interface AgentApi {
-  run(
+  // Starts the run's session or queues into the live one; resolves once queued.
+  send(
     runId: string,
     prompt: string,
+    images: Image[],
     cwd: string,
     resume: string | undefined,
     choice: ModelChoice,
+    permission: Permission,
+    uuid: string,
   ): Promise<void>;
+  setPermission(runId: string, permission: Permission): Promise<void>;
+  answerPermission(runId: string, id: string, allow: boolean): Promise<void>;
   pickWorkspace(): Promise<string | undefined>;
+  // Which of the paths, relative to cwd, exist.
+  paths(
+    cwd: string,
+    candidates: string[],
+  ): Promise<Record<string, 'file' | 'folder'>>;
   catalog(cwd: string): Promise<{ commands: SlashCommand[]; models: Model[] }>;
-  cancel(runId: string): Promise<void>;
+  // Stops the running turn and cancels every queued message.
+  interrupt(runId: string): Promise<void>;
+  close(runId: string): Promise<void>;
   // Null when plan rate limits don't apply, e.g. API key auth.
   usage(cwd: string): Promise<UsageWindow[] | null>;
   onEvent(listener: (runId: string, event: AgentEvent) => void): () => void;

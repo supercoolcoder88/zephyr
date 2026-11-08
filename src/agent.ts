@@ -5,9 +5,12 @@ import {
   ipcMain,
   type WebContents,
 } from 'electron';
+import { stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type {
   Options,
+  Query,
   SDKAssistantMessage,
   SDKMessage,
   SDKUserMessage,
@@ -15,9 +18,11 @@ import type {
 import type {
   AgentEvent,
   Effort,
+  Image,
   Model,
   ModelChoice,
   Output,
+  Permission,
   SlashCommand,
   ThreadItem,
   UsageWindow,
@@ -48,13 +53,36 @@ function options(cwd: string): Options {
     systemPrompt: { type: 'preset', preset: 'claude_code' },
     settingSources: ['user', 'project', 'local'],
     skills: 'all',
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'default',
+    // Lets a session switch to bypassPermissions later.
     allowDangerouslySkipPermissions: true,
   };
 }
 
-// Keyed by a renderer-chosen run id so each thread can cancel its own run.
-const runs = new Map<string, AbortController>();
+const mode = (permission: Permission) =>
+  permission === 'auto' ? 'bypassPermissions' : 'default';
+
+const IDLE_MS = 10 * 60_000;
+const MAX_SESSIONS = 4;
+
+// One long-lived query per thread, keyed by a renderer-chosen run id.
+const sessions = new Map<
+  string,
+  {
+    query: Query;
+    push(message: SDKUserMessage): void;
+    interrupt(): Promise<unknown>;
+    close(): void;
+    model: string;
+    effort?: Effort;
+    permission: Permission;
+    setPermission(permission: Permission): Promise<void>;
+    answers: Map<string, (allow: boolean) => void>;
+    idle: boolean;
+    lastUsed: number;
+    busy(): void;
+  }
+>();
 
 function send(target: WebContents, runId: string, event: AgentEvent) {
   if (!target.isDestroyed()) target.send('agent:event', runId, event);
@@ -67,9 +95,22 @@ function blockEvents(content: AssistantContent) {
     block.type === 'text'
       ? [{ type: 'text', text: block.text }]
       : block.type === 'tool_use'
-        ? [{ type: 'tool', name: block.name, input: block.input }]
+        ? [{ type: 'tool', id: block.id, name: block.name, input: block.input }]
         : [],
   );
+}
+
+function sendPicked(
+  target: WebContents,
+  runId: string,
+  {
+    user_message_uuid,
+    user_message_uuids,
+  }: { user_message_uuid?: string; user_message_uuids?: string[] },
+) {
+  const ids =
+    user_message_uuids ?? (user_message_uuid ? [user_message_uuid] : []);
+  if (ids.length) send(target, runId, { type: 'picked', ids });
 }
 
 function forward(target: WebContents, runId: string, message: SDKMessage) {
@@ -77,6 +118,8 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
     case 'system':
       if (message.subtype === 'init') {
         send(target, runId, { type: 'session', sessionId: message.session_id });
+      } else if (message.subtype === 'session_state_changed') {
+        send(target, runId, { type: 'state', state: message.state });
       } else if (
         message.subtype === 'task_started' &&
         message.task_type === 'local_agent' &&
@@ -100,6 +143,7 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
       break;
     case 'assistant': {
       const id = message.parent_tool_use_id;
+      if (!id) sendPicked(target, runId, message);
       for (const output of blockEvents(message.message.content)) {
         send(
           target,
@@ -110,6 +154,7 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
       break;
     }
     case 'result':
+      sendPicked(target, runId, message);
       send(target, runId, {
         type: 'done',
         ok: message.subtype === 'success' && !message.is_error,
@@ -133,40 +178,196 @@ async function idleQuery(cwd: string) {
 
 export function registerAgentIpc() {
   ipcMain.handle(
-    'agent:run',
+    'agent:send',
     async (
       ipcEvent,
       runId: string,
       prompt: string,
+      images: Image[],
       cwd: string,
       resume: string | undefined,
       { model, effort }: ModelChoice,
+      permission: Permission,
+      uuid: NonNullable<SDKUserMessage['uuid']>,
     ) => {
-      const target = ipcEvent.sender;
-      const abortController = new AbortController();
-      runs.set(runId, abortController);
-      const abort = () => abortController.abort();
-      target.once('destroyed', abort);
-
-      try {
-        const { query } = await loadSdk();
-        for await (const message of query({
-          prompt,
-          options: { ...options(cwd), abortController, resume, model, effort },
-        })) {
-          forward(target, runId, message);
+      const message: SDKUserMessage = {
+        type: 'user',
+        uuid,
+        parent_tool_use_id: null,
+        message: {
+          role: 'user',
+          content: images.length
+            ? [
+                ...images.map((i) => ({
+                  type: 'image' as const,
+                  source: {
+                    type: 'base64' as const,
+                    media_type: i.mediaType,
+                    data: i.data,
+                  },
+                })),
+                ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
+              ]
+            : prompt,
+        },
+      };
+      const { query } = await loadSdk();
+      const live = sessions.get(runId);
+      if (live) {
+        live.busy();
+        live.lastUsed = Date.now();
+        if (model !== live.model) {
+          live.model = model;
+          await live.query.setModel(model);
         }
-      } catch (err) {
-        if (!abortController.signal.aborted) {
-          send(target, runId, {
-            type: 'error',
-            message: err instanceof Error ? err.message : String(err),
-          });
+        if (effort !== live.effort) {
+          live.effort = effort;
+          await live.query.applyFlagSettings({ effortLevel: effort ?? null });
         }
-      } finally {
-        runs.delete(runId);
-        target.off('destroyed', abort);
+        await live.setPermission(permission);
+        return live.push(message);
       }
+
+      if (sessions.size >= MAX_SESSIONS) {
+        [...sessions.values()]
+          .filter((s) => s.idle)
+          .sort((a, b) => a.lastUsed - b.lastUsed)[0]
+          ?.close();
+      }
+      const target = ipcEvent.sender;
+      const pending = [message];
+      let wake = () => {};
+      let closed = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const answers = new Map<string, (allow: boolean) => void>();
+      const q = query({
+        prompt: (async function* () {
+          while (!closed) {
+            const next = pending.shift();
+            if (next) yield next;
+            else await new Promise<void>((r) => (wake = r));
+          }
+        })(),
+        options: {
+          ...options(cwd),
+          resume,
+          model,
+          effort,
+          permissionMode: mode(permission),
+          canUseTool: (tool, input, { signal, requestId, title }) =>
+            new Promise((resolve) => {
+              session.busy();
+              answers.set(requestId, (allow) => {
+                if (!answers.delete(requestId)) return;
+                send(target, runId, { type: 'permission-end', id: requestId });
+                resolve(
+                  allow
+                    ? { behavior: 'allow', updatedInput: input }
+                    : {
+                        behavior: 'deny',
+                        message: 'The user denied this tool call.',
+                      },
+                );
+              });
+              signal.addEventListener('abort', () =>
+                answers.get(requestId)?.(false),
+              );
+              send(target, runId, {
+                type: 'permission',
+                request: { id: requestId, tool, input, title },
+              });
+            }),
+          env: { ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' },
+        },
+      });
+      const session = {
+        query: q,
+        push(m: SDKUserMessage) {
+          pending.push(m);
+          wake();
+        },
+        interrupt() {
+          pending.length = 0;
+          // The SDK accepts cancelQueued but its types don't declare it yet.
+          return (
+            q.interrupt as (o: { cancelQueued: boolean }) => Promise<unknown>
+          ).call(q, { cancelQueued: true });
+        },
+        close() {
+          closed = true;
+          if (sessions.get(runId) === session) sessions.delete(runId);
+          session.busy();
+          wake();
+          q.close();
+        },
+        model,
+        effort,
+        permission,
+        async setPermission(next: Permission) {
+          if (next === this.permission) return;
+          this.permission = next;
+          await q.setPermissionMode(mode(next));
+        },
+        answers,
+        idle: false,
+        lastUsed: Date.now(),
+        busy() {
+          session.idle = false;
+          clearTimeout(timer);
+        },
+      };
+      sessions.set(runId, session);
+      target.once('destroyed', session.close);
+      (async () => {
+        try {
+          for await (const m of q) {
+            if (m.type === 'system' && m.subtype === 'session_state_changed') {
+              session.busy();
+              if (m.state === 'idle' && !answers.size) {
+                session.idle = true;
+                session.lastUsed = Date.now();
+                timer = setTimeout(session.close, IDLE_MS);
+              }
+            }
+            forward(target, runId, m);
+          }
+        } catch (err) {
+          if (!closed) {
+            send(target, runId, {
+              type: 'error',
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
+        } finally {
+          session.busy();
+          for (const answer of answers.values()) answer(false);
+          if (sessions.get(runId) === session) sessions.delete(runId);
+          target.off('destroyed', session.close);
+          send(target, runId, { type: 'end' });
+        }
+      })();
+    },
+  );
+
+  ipcMain.handle('agent:interrupt', async (_, runId: string) => {
+    await sessions.get(runId)?.interrupt();
+  });
+
+  ipcMain.handle('agent:close', (_, runId: string) => {
+    sessions.get(runId)?.close();
+  });
+
+  ipcMain.handle(
+    'agent:set-permission',
+    async (_, runId: string, permission: Permission) => {
+      await sessions.get(runId)?.setPermission(permission);
+    },
+  );
+
+  ipcMain.handle(
+    'agent:permission-answer',
+    (_, runId: string, id: string, allow: boolean) => {
+      sessions.get(runId)?.answers.get(id)?.(allow);
     },
   );
 
@@ -177,6 +378,24 @@ export function registerAgentIpc() {
     );
     return filePaths[0];
   });
+
+  ipcMain.handle(
+    'workspace:paths',
+    async (_, cwd: string, candidates: string[]) => {
+      const found: Record<string, 'file' | 'folder'> = {};
+      await Promise.all(
+        candidates.map(async (p) => {
+          const full = path.resolve(
+            cwd,
+            p.replace(/^~(?=$|[\\/])/, os.homedir()),
+          );
+          const info = await stat(full).catch(() => undefined);
+          if (info) found[p] = info.isDirectory() ? 'folder' : 'file';
+        }),
+      );
+      return found;
+    },
+  );
 
   ipcMain.handle('threads:list', async (_, cwd: string) => {
     const { listSessions } = await loadSdk();
@@ -204,13 +423,35 @@ export function registerAgentIpc() {
         );
       } else if (m.type === 'user') {
         const { content } = m.message as {
-          content: string | { type: string; text?: string }[];
+          content:
+            | string
+            | {
+                type: string;
+                text?: string;
+                source?: {
+                  type: string;
+                  media_type: Image['mediaType'];
+                  data: string;
+                };
+              }[];
         };
+        const blocks = typeof content === 'string' ? [] : content;
         const texts =
           typeof content === 'string'
             ? [content]
-            : content.flatMap((b) => (b.type === 'text' ? [b.text] : []));
-        if (texts.length) items.push({ type: 'user', text: texts.join('\n') });
+            : blocks.flatMap((b) => (b.type === 'text' ? [b.text!] : []));
+        const images = blocks.flatMap((b): Image[] =>
+          b.type === 'image' && b.source?.type === 'base64'
+            ? [{ mediaType: b.source.media_type, data: b.source.data }]
+            : [],
+        );
+        if (texts.length || images.length) {
+          items.push({
+            type: 'user',
+            text: texts.join('\n'),
+            ...(images.length > 0 && { images }),
+          });
+        }
       }
     }
     return items;
@@ -316,8 +557,4 @@ export function registerAgentIpc() {
       }
     },
   );
-
-  ipcMain.handle('agent:cancel', (_, runId: string) => {
-    runs.get(runId)?.abort();
-  });
 }

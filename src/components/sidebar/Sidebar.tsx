@@ -1,15 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Subthread, UsageWindow } from '../agent-types';
-import { threadState, type Thread, type ThreadState } from '../thread';
-
-const dot: Record<ThreadState, string> = {
-  attention: 'bg-warn',
-  error: 'bg-alert',
-  done: 'bg-ok',
-  running: 'animate-pulse bg-cyan',
-  draft: 'bg-draft',
-  read: 'bg-mute',
-};
+import type { Permission, UsageWindow } from '../../agent-types';
+import { stateDot, threadState, type Thread } from '../../thread';
 
 interface Props {
   workspace: string;
@@ -21,7 +12,8 @@ interface Props {
   onNew(): void;
   onDelete(id: string): void;
   error?: string;
-  subthreads: Subthread[];
+  permission: Permission;
+  onPermission(permission: Permission): void;
 }
 
 // Read threads past this many are tucked into the archive at the bottom.
@@ -43,34 +35,32 @@ export default function Sidebar({
   onNew,
   onDelete,
   error,
-  subthreads,
+  permission,
+  onPermission,
 }: Props) {
   const [confirmId, setConfirmId] = useState<string>();
-  const [openSub, setOpenSub] = useState<string>();
   const [showArchived, setShowArchived] = useState(false);
-  // The box follows whether any subthread is running; a manual toggle holds
-  // only until that changes.
-  const running = subthreads.some((s) => s.state === 'running');
-  const [toggled, setToggled] = useState<{ show: boolean; running: boolean }>();
-  const showSubs =
-    toggled && toggled.running === running ? toggled.show : running;
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
 
   const [usage, setUsage] = useState<
     'closed' | 'loading' | 'error' | UsageWindow[] | null
   >('closed');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const footer = useRef<HTMLElement>(null);
   const usageOpen = usage !== 'closed';
+  const popupOpen = usageOpen || settingsOpen;
 
   useEffect(() => {
-    if (!usageOpen) return;
+    if (!popupOpen) return;
     const close = (e: Event) => {
       if (
         e instanceof KeyboardEvent
           ? e.key === 'Escape'
           : !footer.current?.contains(e.target as Node)
-      )
+      ) {
         setUsage('closed');
+        setSettingsOpen(false);
+      }
     };
     document.addEventListener('pointerdown', close);
     document.addEventListener('keydown', close);
@@ -78,9 +68,10 @@ export default function Sidebar({
       document.removeEventListener('pointerdown', close);
       document.removeEventListener('keydown', close);
     };
-  }, [usageOpen]);
+  }, [popupOpen]);
 
   function toggleUsage() {
+    setSettingsOpen(false);
     if (usageOpen) return setUsage('closed');
     setUsage('loading');
     window.agent.usage(workspace).then(
@@ -116,11 +107,11 @@ export default function Sidebar({
           onClick={() => onSelect(thread.id)}
           className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-4 text-left text-sm"
         >
-          <span className="flex-1 truncate">{thread.title}</span>
           <span
             aria-label={threadState(thread, runningIds)}
-            className={`size-1.5 shrink-0 ${dot[threadState(thread, runningIds)]}`}
+            className={`size-1.5 shrink-0 ${stateDot[threadState(thread, runningIds)]}`}
           />
+          <span className="flex-1 truncate">{thread.title}</span>
         </button>
         {!runningIds.includes(thread.id) && (
           <button
@@ -192,60 +183,6 @@ export default function Sidebar({
           </>
         )}
       </nav>
-      {subthreads.length > 0 && (
-        <section className="border-t border-line">
-          <button
-            type="button"
-            onClick={() => setToggled({ show: !showSubs, running })}
-            className="flex h-8 w-full items-center px-4 text-2xs tracking-widest text-mute uppercase transition-colors duration-150 ease-mech hover:bg-line hover:text-ink"
-          >
-            {showSubs ? '[ HIDE SUBTHREADS ]' : '[ SHOW SUBTHREADS ]'}
-          </button>
-          {showSubs && (
-            <ul className="max-h-[40vh] overflow-y-auto pb-2">
-              {subthreads.map((sub) => {
-                const open = openSub === sub.id;
-                return (
-                  <li key={sub.id}>
-                    <button
-                      type="button"
-                      aria-expanded={open}
-                      onClick={() => setOpenSub(open ? undefined : sub.id)}
-                      className={`flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors duration-150 ease-mech ${
-                        open ? 'bg-paper text-void' : 'text-ink hover:bg-line'
-                      }`}
-                    >
-                      <span className="flex-1 truncate">{sub.title}</span>
-                      <span
-                        aria-label={sub.state}
-                        className={`size-1.5 shrink-0 ${dot[sub.state]}`}
-                      />
-                    </button>
-                    {open && (
-                      <div className="space-y-1 px-4 py-2 text-2xs break-words">
-                        {sub.items.map((o, i) =>
-                          o.type === 'text' ? (
-                            <p key={i} className="whitespace-pre-wrap">
-                              {o.text}
-                            </p>
-                          ) : (
-                            <p
-                              key={i}
-                              className="truncate tracking-widest text-mute uppercase"
-                            >
-                              {o.name}
-                            </p>
-                          ),
-                        )}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      )}
       {error && <p className="px-4 py-2 text-2xs text-alert">{error}</p>}
       <footer
         ref={footer}
@@ -291,6 +228,32 @@ export default function Sidebar({
             )}
           </div>
         )}
+        {settingsOpen && (
+          <div
+            role="dialog"
+            aria-label="Settings"
+            className="absolute inset-x-0 bottom-full flex items-center justify-between border-t border-line bg-panel px-4 py-3 text-2xs tracking-widest uppercase"
+          >
+            <span>Permissions</span>
+            <span className="flex gap-1">
+              {(['ask', 'auto'] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  aria-pressed={permission === p}
+                  onClick={() => onPermission(p)}
+                  className={`px-1 transition-colors duration-150 ease-mech ${
+                    permission === p
+                      ? 'bg-paper text-void'
+                      : 'text-mute hover:text-ink'
+                  }`}
+                >
+                  [ {p.toUpperCase()} ]
+                </button>
+              ))}
+            </span>
+          </div>
+        )}
         <button
           type="button"
           onClick={toggleTheme}
@@ -333,6 +296,28 @@ export default function Sidebar({
             strokeLinecap="square"
           >
             <path d="M2 14h12M4 11v-3M8 11V3M12 11V6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setUsage('closed');
+            setSettingsOpen(!settingsOpen);
+          }}
+          aria-label="Settings"
+          aria-expanded={settingsOpen}
+          className={`transition-colors duration-150 ease-mech hover:text-ink ${!settingsOpen ? 'text-mute' : 'text-ink'}`}
+        >
+          <svg
+            viewBox="0 0 16 16"
+            className="size-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="bevel"
+          >
+            <path d="M14.7 6.1v3.8l-1.8-.1-.9 1.5 1 1.6-3.3 1.9-.9-1.7H7.2l-.9 1.7L3 12.9l1-1.6-.9-1.5-1.8.1V6.1l1.8.1.9-1.5-1-1.6 3.3-1.9.9 1.7h1.6l.9-1.7L13 3.1l-1 1.6.9 1.5Z" />
+            <rect x="6" y="6" width="4" height="4" />
           </svg>
         </button>
       </footer>

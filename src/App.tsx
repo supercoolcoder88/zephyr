@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import ChatThread from './components/ChatThread';
-import Sidebar from './components/Sidebar';
-import type { ModelChoice, ThreadItem } from './agent-types';
+import ChatThread from './components/chat/ChatThread';
+import Sidebar from './components/sidebar/Sidebar';
+import type { Image, ModelChoice, Permission, ThreadItem } from './agent-types';
 import { newThread, sortThreads, type Thread } from './thread';
 
 type Listed = Awaited<ReturnType<typeof window.agent.listThreads>>;
@@ -29,8 +29,11 @@ function merge(
         status: known?.status,
         items: known?.items,
         subthreads: known?.subthreads,
+        permissions: known?.permissions,
+        queued: known?.queued,
         key: known?.key,
         prompt: known?.prompt,
+        images: known?.images,
       };
     }),
   ];
@@ -43,9 +46,26 @@ export default function App() {
   const [runningIds, setRunningIds] = useState<string[]>([]);
   const [finishedId, setFinishedId] = useState<string>();
   const [deleteError, setDeleteError] = useState<string>();
-  // Run id -> the thread it belongs to; a draft's id changes when its session starts.
-  const runs = useRef(new Map<string, { id: string; draft?: true }>());
-  const runningThreads = () => [...runs.current.values()].map((r) => r.id);
+  const [permission, setPermission] = useState(
+    () => (localStorage.getItem('permission') ?? 'ask') as Permission,
+  );
+  // Run id -> the thread whose session it drives; a draft's id changes when its session starts.
+  const runs = useRef(
+    new Map<
+      string,
+      {
+        id: string;
+        cwd: string;
+        draft?: true;
+        running?: boolean;
+        stopping?: boolean;
+      }
+    >(),
+  );
+  const runningThreads = () =>
+    [...runs.current.values()].filter((r) => r.running).map((r) => r.id);
+  const runOf = (id: string) =>
+    [...runs.current].find(([, r]) => r.id === id)?.[0];
   const composer = useRef<HTMLTextAreaElement>(null);
 
   function patch(id: string, update: (thread: Thread) => Thread) {
@@ -56,14 +76,111 @@ export default function App() {
     patch(id, (t) => ({ ...t, items: [...(t.items ?? []), item] }));
   }
 
+  const report = (id: string) => (err: unknown) =>
+    append(id, {
+      type: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    });
+
+  function dropPermission(threadId: string, id: string) {
+    patch(threadId, (t) => ({
+      ...t,
+      permissions: t.permissions?.filter((p) => p.id !== id),
+    }));
+  }
+
+  async function finish(runId: string) {
+    const run = runs.current.get(runId);
+    if (!run?.running) return;
+    run.running = false;
+    run.stopping = false;
+    // An interrupted turn never reports its subagents ending.
+    patch(run.id, (t) => ({
+      ...t,
+      permissions: undefined,
+      subthreads: t.subthreads?.map((s) =>
+        s.state === 'running' ? { ...s, state: 'read' } : s,
+      ),
+    }));
+    setFinishedId(run.id);
+    setRunningIds((prev) => prev.filter((t) => t !== run.id));
+    const { cwd } = run;
+    const list = await window.agent.listThreads(cwd);
+    setThreads((prev) => [
+      ...prev.filter((t) => t.cwd !== cwd),
+      ...merge(
+        prev.filter((t) => t.cwd === cwd),
+        cwd,
+        list,
+        runningThreads(),
+      ),
+    ]);
+  }
+
   useEffect(
     () =>
       window.agent.onEvent((runId, event) => {
         const run = runs.current.get(runId);
         if (!run) return;
+        if (event.type === 'end') {
+          patch(run.id, (t) =>
+            t.queued?.length
+              ? {
+                  ...t,
+                  queued: undefined,
+                  items: [
+                    ...(t.items ?? []),
+                    { type: 'error', message: 'Queued messages were not sent' },
+                  ],
+                }
+              : t,
+          );
+          return finish(runId);
+        }
+        if (event.type === 'picked') {
+          return patch(run.id, (t) => {
+            const picked = t.queued?.filter((q) => event.ids.includes(q.uuid));
+            if (!picked?.length) return t;
+            return {
+              ...t,
+              queued: t.queued?.filter((q) => !picked.includes(q)),
+              items: [...(t.items ?? []), ...picked],
+            };
+          });
+        }
+        if (event.type === 'done' && run.stopping) {
+          run.stopping = false;
+          patch(run.id, (t) => ({
+            ...t,
+            status: 'error',
+            updatedAt: Date.now(),
+            items: [...(t.items ?? []), { type: 'error', message: 'STOPPED' }],
+          }));
+          return;
+        }
+        if (event.type === 'state') {
+          if (event.state === 'idle') finish(runId);
+          if (event.state === 'running' && !run.running) {
+            run.running = true;
+            setFinishedId(undefined);
+            setRunningIds((prev) =>
+              prev.includes(run.id) ? prev : [...prev, run.id],
+            );
+          }
+          return;
+        }
         if (event.type === 'done' || event.type === 'error') {
           const status = event.type === 'done' && event.ok ? 'done' : 'error';
           patch(run.id, (t) => ({ ...t, status, updatedAt: Date.now() }));
+        }
+        if (event.type === 'permission') {
+          return patch(run.id, (t) => ({
+            ...t,
+            permissions: [...(t.permissions ?? []), event.request],
+          }));
+        }
+        if (event.type === 'permission-end') {
+          return dropPermission(run.id, event.id);
         }
         if (event.type === 'subthread') {
           const { id, title } = event;
@@ -99,7 +216,7 @@ export default function App() {
         if (!run.draft) return;
         // A draft becomes a real thread once Claude assigns its session id.
         const { sessionId } = event;
-        runs.current.set(runId, { id: sessionId });
+        runs.current.set(runId, { ...run, id: sessionId, draft: undefined });
         patch(run.id, (t) => ({
           ...t,
           key: t.key ?? t.id,
@@ -120,52 +237,55 @@ export default function App() {
   );
   const active = visible.find((t) => t.id === activeId) ?? visible[0];
 
-  async function send(prompt: string, choice: ModelChoice) {
+  function send(prompt: string, images: Image[], choice: ModelChoice) {
     if (!active) return;
     setDeleteError(undefined);
     const { id, cwd, draft } = active;
+    const uuid = crypto.randomUUID();
+    const message = {
+      type: 'user' as const,
+      text: prompt,
+      ...(images.length > 0 && { images }),
+    };
+    const runId = runOf(id) ?? crypto.randomUUID();
+    const queue = runs.current.get(runId)?.running;
     patch(id, (t) => ({
       ...t,
-      title: t.draft && t.items?.length === 0 ? prompt.slice(0, 48) : t.title,
+      title:
+        t.draft && t.items?.length === 0 && prompt
+          ? prompt.slice(0, 48)
+          : t.title,
       status: undefined,
       updatedAt: Date.now(),
-      items: [...(t.items ?? []), { type: 'user', text: prompt }],
+      images: undefined,
+      ...(queue
+        ? { queued: [...(t.queued ?? []), { ...message, uuid }] }
+        : { items: [...(t.items ?? []), message] }),
     }));
-    const runId = crypto.randomUUID();
-    runs.current.set(runId, { id, draft });
-    setRunningIds((prev) => [...prev, id]);
+    runs.current.set(runId, {
+      ...runs.current.get(runId),
+      id,
+      cwd,
+      draft,
+      running: true,
+    });
+    setRunningIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
     setFinishedId(undefined);
-    try {
-      await window.agent.run(
+    window.agent
+      .send(
         runId,
         prompt,
+        images,
         cwd,
         draft ? undefined : id,
         choice,
-      );
-    } finally {
-      const finished = runs.current.get(runId)!.id;
-      runs.current.delete(runId);
-      // A cancelled run never reports its subagents ending.
-      patch(finished, (t) => ({
-        ...t,
-        subthreads: t.subthreads?.map((s) =>
-          s.state === 'running' ? { ...s, state: 'read' } : s,
-        ),
-      }));
-      setFinishedId(finished);
-      setRunningIds((prev) => prev.filter((t) => t !== finished));
-    }
-    const list = await window.agent.listThreads(cwd);
-    setThreads((prev) => [
-      ...prev.filter((t) => t.cwd !== cwd),
-      ...merge(
-        prev.filter((t) => t.cwd === cwd),
-        cwd,
-        list,
-        runningThreads(),
-      ),
-    ]);
+        permission,
+        uuid,
+      )
+      .catch((err) => {
+        report(runs.current.get(runId)!.id)(err);
+        finish(runId);
+      });
   }
 
   function select(thread: Thread) {
@@ -175,7 +295,8 @@ export default function App() {
       active?.id !== thread.id &&
       active?.draft &&
       active.items?.length === 0 &&
-      !active.prompt?.trim();
+      !active.prompt?.trim() &&
+      !active.images?.length;
     setThreads((prev) =>
       (abandoned ? prev.filter((t) => t.id !== active.id) : prev).map((t) =>
         t.id === thread.id || t.id === active?.id
@@ -205,7 +326,11 @@ export default function App() {
   function create() {
     if (!workspace) return;
     const empty = visible.find(
-      (t) => t.draft && t.items?.length === 0 && !t.prompt?.trim(),
+      (t) =>
+        t.draft &&
+        t.items?.length === 0 &&
+        !t.prompt?.trim() &&
+        !t.images?.length,
     );
     if (empty) {
       select(empty);
@@ -221,6 +346,11 @@ export default function App() {
     const thread = visible.find((t) => t.id === id)!;
     if (runningIds.includes(id)) return;
     setDeleteError(undefined);
+    const runId = runOf(id);
+    if (runId) {
+      runs.current.delete(runId);
+      await window.agent.close(runId);
+    }
     if (!thread.draft) {
       try {
         await window.agent.deleteThread(id, thread.cwd);
@@ -254,6 +384,10 @@ export default function App() {
     setThreads((prev) => [...prev.filter((t) => t.cwd !== cwd), ...loaded]);
     setWorkspace(cwd);
     select(loaded[0]);
+    for (const [runId, run] of runs.current) {
+      if (run.cwd === workspace && !run.running)
+        window.agent.close(runId).catch(report(run.id));
+    }
   }
 
   if (!active) {
@@ -288,7 +422,14 @@ export default function App() {
         onNew={create}
         onDelete={remove}
         error={deleteError}
-        subthreads={active.subthreads ?? []}
+        permission={permission}
+        onPermission={(next) => {
+          setPermission(next);
+          localStorage.setItem('permission', next);
+          for (const [runId, run] of runs.current) {
+            window.agent.setPermission(runId, next).catch(report(run.id));
+          }
+        }}
       />
       <ChatThread
         key={active.key ?? active.id}
@@ -297,10 +438,22 @@ export default function App() {
         justFinished={finishedId === active.id}
         onSend={send}
         onPrompt={(prompt) => patch(active.id, (t) => ({ ...t, prompt }))}
+        onImages={(update) =>
+          patch(active.id, (t) => ({ ...t, images: update(t.images ?? []) }))
+        }
         onCancel={() => {
-          for (const [runId, run] of runs.current) {
-            if (run.id === active.id) window.agent.cancel(runId);
-          }
+          const runId = runOf(active.id);
+          const run = runId && runs.current.get(runId);
+          if (!run) return;
+          run.stopping = run.running;
+          patch(active.id, (t) => ({ ...t, queued: undefined }));
+          window.agent.interrupt(runId).catch(report(active.id));
+        }}
+        onAnswer={(id, allow) => {
+          dropPermission(active.id, id);
+          window.agent
+            .answerPermission(runOf(active.id)!, id, allow)
+            .catch(report(active.id));
         }}
         composer={composer}
       />

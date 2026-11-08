@@ -30,6 +30,11 @@
   --color-code-blue: #61afef;
   --color-code-purple: #c678dd;
 
+  /* Composer references follow the theme's code palette. */
+  --color-command: var(--color-code-purple);
+  --color-file: var(--color-code-green);
+  --color-folder: var(--color-code-yellow);
+
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
   --font-sans: var(--font-mono);
 

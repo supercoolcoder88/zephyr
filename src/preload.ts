@@ -4,11 +4,28 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { AgentApi, AgentEvent } from './agent-types';
 
 const agent: AgentApi = {
-  run: (runId, prompt, cwd, resume, choice) =>
-    ipcRenderer.invoke('agent:run', runId, prompt, cwd, resume, choice),
+  send: (runId, prompt, images, cwd, resume, choice, permission, uuid) =>
+    ipcRenderer.invoke(
+      'agent:send',
+      runId,
+      prompt,
+      images,
+      cwd,
+      resume,
+      choice,
+      permission,
+      uuid,
+    ),
+  setPermission: (runId, permission) =>
+    ipcRenderer.invoke('agent:set-permission', runId, permission),
+  answerPermission: (runId, id, allow) =>
+    ipcRenderer.invoke('agent:permission-answer', runId, id, allow),
   pickWorkspace: () => ipcRenderer.invoke('workspace:pick'),
+  paths: (cwd, candidates) =>
+    ipcRenderer.invoke('workspace:paths', cwd, candidates),
   catalog: (cwd) => ipcRenderer.invoke('agent:catalog', cwd),
-  cancel: (runId) => ipcRenderer.invoke('agent:cancel', runId),
+  interrupt: (runId) => ipcRenderer.invoke('agent:interrupt', runId),
+  close: (runId) => ipcRenderer.invoke('agent:close', runId),
   usage: (cwd) => ipcRenderer.invoke('agent:usage', cwd),
   listThreads: (cwd) => ipcRenderer.invoke('threads:list', cwd),
   loadThread: (sessionId, cwd) =>

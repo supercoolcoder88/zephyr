@@ -3,10 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
 import { readFileSync } from 'node:fs';
 import { beforeEach, expect, it, vi } from 'vitest';
-import type { ThreadItem } from '../agent-types';
+import type { PermissionRequest, ThreadItem } from '../../agent-types';
 import ChatThread from './ChatThread';
 
-const css = readFileSync(`${__dirname}/../index.css`, 'utf8');
+const css = readFileSync(`${__dirname}/../../index.css`, 'utf8');
 const rule = (selector: string) => {
   const start = css.indexOf(`  & ${selector} {`);
   return start < 0 ? '' : css.slice(start, css.indexOf('}', start));
@@ -18,21 +18,37 @@ beforeEach(() => {
   document.getSelection()?.removeAllRanges();
   window.agent = {
     catalog: async () => ({ commands: [], models: [] }),
+    paths: async () => ({}),
   } as unknown as typeof window.agent;
 });
 
+const view = (
+  items: ThreadItem[],
+  running = false,
+  permissions?: PermissionRequest[],
+) => (
+  <ChatThread
+    thread={{
+      id: 't1',
+      title: 'Thread',
+      cwd: '/proj',
+      updatedAt: 0,
+      items,
+      permissions,
+    }}
+    running={running}
+    justFinished={false}
+    onSend={() => undefined}
+    onCancel={() => undefined}
+    onPrompt={() => undefined}
+    onImages={() => undefined}
+    onAnswer={() => undefined}
+    composer={null}
+  />
+);
+
 const renderItems = (items: ThreadItem[], running = false) =>
-  render(
-    <ChatThread
-      thread={{ id: 't1', title: 'Thread', cwd: '/proj', updatedAt: 0, items }}
-      running={running}
-      justFinished={false}
-      onSend={() => undefined}
-      onCancel={() => undefined}
-      onPrompt={() => undefined}
-      composer={null}
-    />,
-  ).container;
+  render(view(items, running)).container;
 
 const renderText = (text: string) => renderItems([{ type: 'text', text }]);
 
@@ -86,13 +102,13 @@ it('indents every agent line behind the same 1px rule as the user marker', () =>
     [
       { type: 'user', text: 'hi' },
       { type: 'text', text: 'reply' },
-      { type: 'tool', name: 'Bash', input: { command: 'ls' } },
+      { type: 'tool', id: 'tu', name: 'Bash', input: { command: 'ls' } },
       { type: 'error', message: 'boom' },
       { type: 'done', ok: false, result: 'nope' },
     ],
     true,
   );
-  expect(screen.getByText('hi').parentElement).toHaveClass('border', 'px-3');
+  expect(screen.getByText('hi').closest('.border')).toHaveClass('px-3');
   for (const line of [
     screen.getByText('reply').closest('.markdown'),
     screen.getByText('bash').parentElement,
@@ -107,7 +123,7 @@ it('gives only the streaming text a cyan rule', () => {
     [
       { type: 'user', text: 'hi' },
       { type: 'text', text: 'old' },
-      { type: 'tool', name: 'Agent', input: { description: 'sub' } },
+      { type: 'tool', id: 'tu', name: 'Agent', input: { description: 'sub' } },
       { type: 'text', text: 'new' },
     ],
     true,
@@ -141,6 +157,8 @@ const renderQuote = (prompt = '') => {
       onSend={() => undefined}
       onCancel={() => undefined}
       onPrompt={onPrompt}
+      onImages={() => undefined}
+      onAnswer={() => undefined}
       composer={composer}
     />,
   );
@@ -222,4 +240,54 @@ it('hides the copy button when the selection clears or the transcript scrolls', 
   expect(copyButton()).toBeInTheDocument();
   fireEvent.scroll(line.closest('.overflow-y-auto')!);
   expect(copyButton()).toBeNull();
+});
+
+it('offers stop and queueing while running', async () => {
+  const onSend = vi.fn();
+  const onCancel = vi.fn();
+  render(
+    <ChatThread
+      thread={{
+        id: 't1',
+        title: 'Thread',
+        cwd: '/proj',
+        updatedAt: 0,
+        items: [],
+      }}
+      running
+      justFinished={false}
+      onSend={onSend}
+      onCancel={onCancel}
+      onPrompt={() => undefined}
+      onImages={() => undefined}
+      onAnswer={() => undefined}
+      composer={null}
+    />,
+  );
+  const send = screen.getByRole('button', { name: '[ SEND ]' });
+  const stop = screen.getByRole('button', { name: '[ STOP ]' });
+  expect(send).toBeDisabled();
+  expect(send).toHaveClass('chamfer');
+  expect(stop).not.toHaveClass('chamfer');
+  await userEvent.type(screen.getByRole('textbox'), 'more info{Enter}');
+  expect(onSend).toHaveBeenCalledWith('more info', [], { model: 'opus' });
+  await userEvent.type(screen.getByRole('textbox'), 'again');
+  await userEvent.click(send);
+  expect(onSend).toHaveBeenLastCalledWith('again', [], { model: 'opus' });
+  await userEvent.click(stop);
+  expect(onCancel).toHaveBeenCalled();
+});
+
+it('scrolls a new permission card into view when pinned to the bottom', () => {
+  const items: ThreadItem[] = [{ type: 'user', text: 'go' }];
+  const { container, rerender } = render(view(items, true));
+  const scroller = container.querySelector<HTMLElement>('.overflow-y-auto')!;
+  Object.defineProperty(scroller, 'scrollHeight', { value: 500 });
+  rerender(
+    view(items, true, [{ id: 'r1', tool: 'Bash', input: { command: 'ls' } }]),
+  );
+  expect(
+    screen.getByRole('group', { name: 'Permission request' }),
+  ).toBeTruthy();
+  expect(scroller.scrollTop).toBe(500);
 });

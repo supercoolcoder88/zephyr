@@ -1,4 +1,11 @@
-import { act, render, screen, within } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import App from './App';
@@ -7,20 +14,24 @@ import type { AgentEvent } from './agent-types';
 type User = ReturnType<typeof userEvent.setup>;
 
 let listener: (runId: string, event: AgentEvent) => void;
-const finishers = new Map<string, () => void>();
-const lastRunId = () => agent.run.mock.lastCall![0] as string;
+const lastRunId = () => agent.send.mock.lastCall![0] as string;
 const emit = (event: AgentEvent, runId = lastRunId()) => listener(runId, event);
-const finishRun = (runId = lastRunId()) => finishers.get(runId)!();
+const finishRun = (runId = lastRunId()) =>
+  emit({ type: 'state', state: 'idle' }, runId);
 const agent = {
-  run: vi.fn(),
+  send: vi.fn(),
   pickWorkspace: vi.fn(),
-  cancel: vi.fn(),
+  interrupt: vi.fn(),
+  close: vi.fn(),
   usage: vi.fn(),
   onEvent: vi.fn(),
   listThreads: vi.fn(),
   loadThread: vi.fn(),
   deleteThread: vi.fn(),
   catalog: vi.fn(),
+  paths: vi.fn(),
+  setPermission: vi.fn(),
+  answerPermission: vi.fn(),
 };
 
 beforeEach(() => {
@@ -29,6 +40,7 @@ beforeEach(() => {
   agent.listThreads.mockResolvedValue([]);
   agent.loadThread.mockResolvedValue([]);
   agent.deleteThread.mockResolvedValue(undefined);
+  agent.paths.mockResolvedValue({});
   agent.catalog.mockResolvedValue({
     commands: [
       { name: 'compact', description: 'Summarize', argumentHint: '' },
@@ -50,10 +62,11 @@ beforeEach(() => {
     ],
   });
   localStorage.clear();
-  agent.run.mockImplementation(
-    (runId: string) =>
-      new Promise<void>((resolve) => finishers.set(runId, resolve)),
-  );
+  agent.send.mockResolvedValue(undefined);
+  agent.setPermission.mockResolvedValue(undefined);
+  agent.answerPermission.mockResolvedValue(undefined);
+  agent.interrupt.mockResolvedValue(undefined);
+  agent.close.mockResolvedValue(undefined);
   agent.onEvent.mockImplementation((l) => {
     listener = l;
     return () => undefined;
@@ -98,7 +111,7 @@ it('lists sessions on open and loads the newest', async () => {
   agent.loadThread.mockResolvedValue([
     { type: 'user', text: 'old prompt' },
     { type: 'text', text: 'old answer' },
-    { type: 'tool', name: 'Read', input: { file_path: 'x.ts' } },
+    { type: 'tool', id: 'tu', name: 'Read', input: { file_path: 'x.ts' } },
     { type: 'text', text: 'final answer' },
   ]);
   await open();
@@ -110,7 +123,9 @@ it('lists sessions on open and loads the newest', async () => {
   expect(screen.getByText('old prompt')).toBeInTheDocument();
   expect(screen.queryByText('old answer')).toBeNull();
   expect(screen.queryByText('x.ts')).toBeNull();
-  expect(screen.getByRole('button', { name: '[ 2 HIDDEN ]' })).toBeTruthy();
+  expect(
+    screen.getByRole('button', { name: '[ SHOW THINKING ]' }),
+  ).toBeTruthy();
 });
 
 it('shows one empty draft when the project has no sessions', async () => {
@@ -149,25 +164,61 @@ it('resumes the session when sending in a loaded thread', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
   await sendPrompt(user, 'continue');
-  expect(agent.run).toHaveBeenCalledWith(
+  expect(agent.send).toHaveBeenCalledWith(
     expect.any(String),
     'continue',
+    [],
     '/proj',
     'b',
     { model: 'opus' },
+    'ask',
+    expect.any(String),
   );
 });
 
 it('starts a fresh session when sending in a draft', async () => {
   const user = await open();
   await sendPrompt(user, 'start');
-  expect(agent.run).toHaveBeenCalledWith(
+  expect(agent.send).toHaveBeenCalledWith(
     expect.any(String),
     'start',
+    [],
     '/proj',
     undefined,
     { model: 'opus' },
+    'ask',
+    expect.any(String),
   );
+});
+
+it('attaches pasted images and sends them with the prompt', async () => {
+  const user = await open();
+  const box = screen.getByPlaceholderText('Ask the agent…');
+  fireEvent.paste(box, {
+    clipboardData: {
+      files: [new File(['png'], 'shot.png', { type: 'image/png' })],
+    },
+  });
+  await user.click(await screen.findByRole('button', { name: 'Remove image' }));
+  expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
+  fireEvent.paste(box, {
+    clipboardData: {
+      files: [new File(['png'], 'shot.png', { type: 'image/png' })],
+    },
+  });
+  await screen.findByRole('button', { name: 'Remove image' });
+  await user.click(screen.getByRole('button', { name: '[ SEND ]' }));
+  expect(agent.send).toHaveBeenCalledWith(
+    expect.any(String),
+    '',
+    [{ mediaType: 'image/png', data: btoa('png') }],
+    '/proj',
+    undefined,
+    { model: 'opus' },
+    'ask',
+    expect.any(String),
+  );
+  expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
 });
 
 it('sends on Enter and inserts a newline on Shift+Enter', async () => {
@@ -176,12 +227,15 @@ it('sends on Enter and inserts a newline on Shift+Enter', async () => {
     screen.getByPlaceholderText('Ask the agent…'),
     'line one{Shift>}{Enter}{/Shift}line two{Enter}',
   );
-  expect(agent.run).toHaveBeenCalledWith(
+  expect(agent.send).toHaveBeenCalledWith(
     expect.any(String),
     'line one\nline two',
+    [],
     '/proj',
     undefined,
     { model: 'opus' },
+    'ask',
+    expect.any(String),
   );
 });
 
@@ -202,12 +256,16 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
   expect(heading()).toBe('New thread');
   await sendPrompt(user, 'first prompt');
-  expect(agent.run).toHaveBeenLastCalledWith(
+  const runId = lastRunId();
+  expect(agent.send).toHaveBeenLastCalledWith(
     expect.any(String),
     'first prompt',
+    [],
     '/proj',
     undefined,
     { model: 'opus' },
+    'ask',
+    expect.any(String),
   );
 
   act(() => emit({ type: 'session', sessionId: 'sid' }));
@@ -229,12 +287,15 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   expect(agent.loadThread).not.toHaveBeenCalledWith('sid', '/proj');
 
   await sendPrompt(user, 'second prompt');
-  expect(agent.run).toHaveBeenLastCalledWith(
-    expect.any(String),
+  expect(agent.send).toHaveBeenLastCalledWith(
+    runId,
     'second prompt',
+    [],
     '/proj',
     'sid',
     { model: 'opus' },
+    'ask',
+    expect.any(String),
   );
 });
 
@@ -258,9 +319,16 @@ it('runs threads concurrently and routes events by run', async () => {
   await sendPrompt(user, 'second');
   const runA = lastRunId();
   expect(runA).not.toBe(runB);
-  expect(agent.run).toHaveBeenLastCalledWith(runA, 'second', '/proj', 'a', {
-    model: 'opus',
-  });
+  expect(agent.send).toHaveBeenLastCalledWith(
+    runA,
+    'second',
+    [],
+    '/proj',
+    'a',
+    { model: 'opus' },
+    'ask',
+    expect.any(String),
+  );
 
   act(() => emit({ type: 'text', text: 'answer b' }, runB));
   act(() => emit({ type: 'text', text: 'answer a' }, runA));
@@ -268,7 +336,7 @@ it('runs threads concurrently and routes events by run', async () => {
   expect(screen.queryByText('answer b')).toBeNull();
 
   await user.click(screen.getByRole('button', { name: '[ STOP ]' }));
-  expect(agent.cancel).toHaveBeenCalledWith(runA);
+  expect(agent.interrupt).toHaveBeenCalledWith(runA);
 
   await act(async () => finishRun(runA));
   expect(screen.getByText('IDLE')).toBeInTheDocument();
@@ -451,12 +519,15 @@ it('runs a slash command picked from the menu', async () => {
     '/review <pr>Review a PR',
   ]);
   await user.type(box, 'co{Enter}');
-  expect(agent.run).toHaveBeenCalledWith(
+  expect(agent.send).toHaveBeenCalledWith(
     expect.any(String),
     '/compact',
+    [],
     '/proj',
     undefined,
     { model: 'opus' },
+    'ask',
+    expect.any(String),
   );
 });
 
@@ -480,12 +551,15 @@ it('sends with the model and effort picked from the composer', async () => {
   expect(screen.queryByRole('menu')).toBeNull();
   expect(picker).toHaveTextContent('Sonnet 5.5 · high');
   await sendPrompt(user, 'go');
-  expect(agent.run).toHaveBeenCalledWith(
+  expect(agent.send).toHaveBeenCalledWith(
     expect.any(String),
     'go',
+    [],
     '/proj',
     undefined,
     { model: 'sonnet', effort: 'high' },
+    'ask',
+    expect.any(String),
   );
 
   await act(async () => finishRun());
@@ -493,12 +567,15 @@ it('sends with the model and effort picked from the composer', async () => {
   await user.click(screen.getByRole('menuitem', { name: 'Sonnet 5.5' }));
   expect(picker).toHaveTextContent('Sonnet 5.5 · low');
   await sendPrompt(user, 'again');
-  expect(agent.run).toHaveBeenLastCalledWith(
+  expect(agent.send).toHaveBeenLastCalledWith(
     expect.any(String),
     'again',
+    [],
     '/proj',
     undefined,
     { model: 'sonnet' },
+    'ask',
+    expect.any(String),
   );
 });
 
@@ -546,17 +623,24 @@ it('completes slash commands that take arguments', async () => {
   await user.type(box, '/{ArrowDown}{Enter}');
   expect(box).toHaveValue('/review ');
   expect(screen.queryByRole('listbox')).toBeNull();
-  expect(agent.run).not.toHaveBeenCalled();
+  expect(agent.send).not.toHaveBeenCalled();
 
   await user.clear(box);
   await user.type(box, '/{Escape}');
   expect(screen.queryByRole('listbox')).toBeNull();
 });
 
-it('shows subthreads in the sidebar and hides them once all are done', async () => {
+it("lists a turn's subthreads and opens one in a popup", async () => {
   const user = await open();
   await sendPrompt(user, 'go');
-  const toggle = () => screen.getByRole('button', { name: /SUBTHREADS/ });
+  act(() =>
+    emit({
+      type: 'tool',
+      id: 't1',
+      name: 'Agent',
+      input: { description: 'count files' },
+    }),
+  );
   act(() => emit({ type: 'subthread', id: 't1', title: 'count files' }));
   act(() =>
     emit({
@@ -565,23 +649,64 @@ it('shows subthreads in the sidebar and hides them once all are done', async () 
       output: { type: 'text', text: 'counting now' },
     }),
   );
-  expect(toggle()).toHaveTextContent('[ HIDE SUBTHREADS ]');
+  expect(
+    within(screen.getByRole('navigation')).queryByText('count files'),
+  ).toBeNull();
+
+  await user.click(screen.getByRole('button', { name: '[ SUBTHREADS 1 ]' }));
   const sub = screen.getByRole('button', { name: /count files/ });
   expect(within(sub).getByLabelText('running')).toBeInTheDocument();
 
   await user.click(sub);
-  expect(screen.getByText('counting now')).toBeInTheDocument();
+  const popup = screen.getByRole('dialog', { name: 'count files' });
+  expect(within(popup).getByText('counting now')).toBeInTheDocument();
+  expect(within(popup).getByText('RUNNING')).toBeInTheDocument();
 
   act(() => emit({ type: 'subthread-end', id: 't1', ok: true }));
-  expect(toggle()).toHaveTextContent('[ SHOW SUBTHREADS ]');
-  expect(screen.queryByRole('button', { name: /count files/ })).toBeNull();
+  expect(within(popup).getByText('DONE')).toBeInTheDocument();
 
-  await user.click(toggle());
-  expect(
-    within(screen.getByRole('button', { name: /count files/ })).getByLabelText(
-      'done',
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(within(sub).getByLabelText('done')).toBeInTheDocument();
+});
+
+it('colours valid slash commands and existing paths in the composer', async () => {
+  agent.paths.mockImplementation(async (_cwd: string, candidates: string[]) =>
+    Object.fromEntries(
+      candidates.flatMap((c) =>
+        c === 'src/App.tsx'
+          ? [[c, 'file']]
+          : c === 'src/'
+            ? [[c, 'folder']]
+            : [],
+      ),
     ),
-  ).toBeInTheDocument();
+  );
+  const user = await open();
+  const box = screen.getByPlaceholderText('Ask the agent…');
+  await user.type(box, '/review @src/App.tsx src/ missing.ts{Escape}');
+  const mirror = box.previousElementSibling!;
+  expect(
+    await within(mirror as HTMLElement).findByText('@src/App.tsx'),
+  ).toHaveClass('text-file');
+  expect(within(mirror as HTMLElement).getByText('/review')).toHaveClass(
+    'text-command',
+  );
+  expect(within(mirror as HTMLElement).getByText('src/')).toHaveClass(
+    'text-folder',
+  );
+  expect(agent.paths).toHaveBeenLastCalledWith('/proj', [
+    'src/App.tsx',
+    'src/',
+    'missing.ts',
+  ]);
+  expect(within(mirror as HTMLElement).getByText('missing.ts')).not.toHaveClass(
+    'text-file',
+  );
+
+  await user.clear(box);
+  await user.type(box, '/nope');
+  expect(mirror.querySelector('.text-command')).toBeNull();
 });
 
 async function running() {
@@ -598,7 +723,12 @@ const finish = async () => {
 it('shows a tool call as one quiet line', async () => {
   await running();
   act(() =>
-    emit({ type: 'tool', name: 'Bash', input: { command: 'npm test\nmore' } }),
+    emit({
+      type: 'tool',
+      id: 'tu',
+      name: 'Bash',
+      input: { command: 'npm test\nmore' },
+    }),
   );
   const line = screen.getByText('bash').parentElement!;
   expect(line).toHaveTextContent('npm test');
@@ -617,13 +747,13 @@ it.each([
   ['Mystery', { x: 1 }, 'mystery', '{"x":1}'],
 ])('summarises %s input', async (name, input, label, summary) => {
   await running();
-  act(() => emit({ type: 'tool', name, input }));
+  act(() => emit({ type: 'tool', id: 'tu', name, input }));
   expect(screen.getByText(label).parentElement).toHaveTextContent(summary);
 });
 
 const steps: AgentEvent[] = [
   { type: 'text', text: 'let me look' },
-  { type: 'tool', name: 'Bash', input: { command: 'ls' } },
+  { type: 'tool', id: 'tu', name: 'Bash', input: { command: 'ls' } },
   { type: 'text', text: 'all good' },
 ];
 
@@ -648,13 +778,18 @@ it('keeps only the final answer once the run finishes', async () => {
 it('keeps text written in response to a subagent', async () => {
   await running();
   for (const e of [
-    { type: 'tool', name: 'Agent', input: { description: 'explore' } },
+    {
+      type: 'tool',
+      id: 'tu',
+      name: 'Agent',
+      input: { description: 'explore' },
+    },
     { type: 'text', text: 'subagent says hi' },
-    { type: 'tool', name: 'Read', input: { file_path: 'a' } },
+    { type: 'tool', id: 'tu', name: 'Read', input: { file_path: 'a' } },
     { type: 'text', text: 'after read' },
-    { type: 'tool', name: 'Task', input: { description: 'older' } },
+    { type: 'tool', id: 'tu', name: 'Task', input: { description: 'older' } },
     { type: 'text', text: 'task says hi' },
-    { type: 'tool', name: 'Bash', input: { command: 'ls' } },
+    { type: 'tool', id: 'tu', name: 'Bash', input: { command: 'ls' } },
     { type: 'text', text: 'final' },
   ] as AgentEvent[])
     act(() => emit(e));
@@ -670,10 +805,10 @@ it('toggles hidden items in a finished turn', async () => {
   const user = await running();
   for (const e of steps) act(() => emit(e));
   await finish();
-  await user.click(screen.getByRole('button', { name: '[ 2 HIDDEN ]' }));
+  await user.click(screen.getByRole('button', { name: '[ SHOW THINKING ]' }));
   expect(screen.getByText('let me look')).toBeInTheDocument();
   expect(screen.getByText('bash')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: '[ HIDE ]' }));
+  await user.click(screen.getByRole('button', { name: '[ HIDE THINKING ]' }));
   expect(screen.queryByText('let me look')).toBeNull();
   expect(screen.queryByText('bash')).toBeNull();
 });
@@ -683,7 +818,7 @@ it('shows no toggle when nothing is hidden', async () => {
   act(() => emit({ type: 'text', text: 'just an answer' }));
   await finish();
   expect(screen.getByText('just an answer')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /HIDDEN/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /THINKING/ })).toBeNull();
 });
 
 it('keeps errors visible in a finished turn', async () => {
@@ -691,7 +826,7 @@ it('keeps errors visible in a finished turn', async () => {
   for (const e of [
     ...steps,
     { type: 'error', message: 'exploded' },
-    { type: 'tool', name: 'Bash', input: { command: 'ls' } },
+    { type: 'tool', id: 'tu', name: 'Bash', input: { command: 'ls' } },
   ] as AgentEvent[])
     act(() => emit(e));
   await finish();
@@ -735,4 +870,383 @@ it('keeps a draft with text as yellow and restores its text', async () => {
   expect(screen.getByPlaceholderText('Ask the agent…')).toHaveValue(
     'half typed',
   );
+});
+
+it('keeps pasted images with a draft across thread switches', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  fireEvent.paste(screen.getByPlaceholderText('Ask the agent…'), {
+    clipboardData: {
+      files: [new File(['png'], 'shot.png', { type: 'image/png' })],
+    },
+  });
+  await screen.findByRole('button', { name: 'Remove image' });
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
+  expect(row(/New thread/).getByLabelText('draft')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: /New thread/ }));
+  expect(
+    screen.getByRole('button', { name: 'Remove image' }),
+  ).toBeInTheDocument();
+});
+
+it('rejects pasted images over 5 MB', async () => {
+  await open();
+  const big = new File([new Uint8Array(4 * 1024 * 1024)], 'big.png', {
+    type: 'image/png',
+  });
+  fireEvent.paste(screen.getByPlaceholderText('Ask the agent…'), {
+    clipboardData: { files: [big] },
+  });
+  expect(screen.getByText(/IMAGE OVER 5 MB/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
+});
+
+it('queues a message sent while the agent is running into the same run', async () => {
+  const user = await running();
+  const runId = lastRunId();
+  act(() => emit({ type: 'text', text: 'working' }));
+  await sendPrompt(user, 'also this');
+  expect(screen.getByText('also this').closest('.opacity-50')).not.toBeNull();
+  expect(agent.send).toHaveBeenCalledTimes(2);
+  expect(agent.send).toHaveBeenLastCalledWith(
+    runId,
+    'also this',
+    [],
+    '/proj',
+    undefined,
+    { model: 'opus' },
+    'ask',
+    expect.any(String),
+  );
+  expect(screen.getByText('RUNNING')).toBeInTheDocument();
+  act(() => emit({ type: 'text', text: 'still on the first' }));
+  const uuid = agent.send.mock.lastCall![7] as string;
+  act(() => emit({ type: 'picked', ids: [uuid] }));
+  act(() => emit({ type: 'text', text: 'on the second' }));
+  expect(screen.getByText('also this').closest('.opacity-50')).toBeNull();
+  const order = ['still on the first', 'also this', 'on the second'].map((t) =>
+    screen.getByText(t),
+  );
+  expect(
+    order[0].compareDocumentPosition(order[1]) &
+      order[1].compareDocumentPosition(order[2]) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+it.each([
+  ['goes idle', { type: 'state', state: 'idle' }],
+  ['ends', { type: 'end' }],
+] as [string, AgentEvent][])(
+  'stays running after a result until the session %s',
+  async (_, event) => {
+    await running();
+    act(() => emit({ type: 'done', ok: true, result: 'ok' }));
+    expect(screen.getByText('RUNNING')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '[ STOP ]' }),
+    ).toBeInTheDocument();
+    act(() => emit({ type: 'state', state: 'running' }));
+    expect(screen.getByText('RUNNING')).toBeInTheDocument();
+    expect(agent.listThreads).toHaveBeenCalledTimes(1);
+    await act(async () => emit(event));
+    expect(screen.getByText('IDLE')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '[ STOP ]' })).toBeNull();
+    expect(agent.listThreads).toHaveBeenCalledTimes(2);
+  },
+);
+
+it('stops the turn without ending the session', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await running();
+  const runId = lastRunId();
+  await sendPrompt(user, 'queued');
+  expect(screen.getByText('queued')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '[ STOP ]' }));
+  expect(agent.interrupt).toHaveBeenCalledWith(runId);
+  expect(screen.queryByText('queued')).toBeNull();
+  act(() =>
+    emit({ type: 'done', ok: false, result: 'error_during_execution' }),
+  );
+  expect(screen.getByText('STOPPED')).toBeInTheDocument();
+  expect(screen.queryByText(/error_during_execution/)).toBeNull();
+  await act(async () => finishRun());
+  await sendPrompt(user, 'next');
+  expect(agent.send).toHaveBeenLastCalledWith(
+    runId,
+    'next',
+    [],
+    '/proj',
+    'b',
+    { model: 'opus' },
+    'ask',
+    expect.any(String),
+  );
+  expect(agent.close).not.toHaveBeenCalled();
+});
+
+it('shows a failed stop as an error', async () => {
+  const user = await running();
+  agent.interrupt.mockRejectedValue(new Error('session closing'));
+  await user.click(screen.getByRole('button', { name: '[ STOP ]' }));
+  expect(await screen.findByText('session closing')).toHaveClass('text-alert');
+});
+
+it('closes the live session of a deleted thread', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await running();
+  const runId = lastRunId();
+  await act(async () => finishRun());
+  await remove(user, /Older/);
+  expect(agent.close).not.toHaveBeenCalled();
+  await remove(user, /Newest/);
+  expect(agent.close).toHaveBeenCalledWith(runId);
+  expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj');
+});
+
+it("closes the left project's idle sessions and resumes them on return", async () => {
+  agent.listThreads.mockImplementation(async (cwd: string) =>
+    cwd === '/proj' ? list : [{ id: 'o', title: 'Other', updatedAt: 3 }],
+  );
+  const user = await open();
+  await sendPrompt(user, 'first');
+  const idleRun = lastRunId();
+  await act(async () => finishRun());
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  await sendPrompt(user, 'second');
+  const busyRun = lastRunId();
+
+  agent.pickWorkspace.mockResolvedValue('/other');
+  await user.click(screen.getByRole('button', { name: 'proj' }));
+  await screen.findByRole('button', { name: /Other/ });
+  expect(agent.close).toHaveBeenCalledWith(idleRun);
+  expect(agent.close).not.toHaveBeenCalledWith(busyRun);
+
+  agent.pickWorkspace.mockResolvedValue('/proj');
+  await user.click(screen.getByRole('button', { name: 'other' }));
+  await user.click(await screen.findByRole('button', { name: /Newest/ }));
+  await sendPrompt(user, 'again');
+  expect(agent.send).toHaveBeenLastCalledWith(
+    idleRun,
+    'again',
+    [],
+    '/proj',
+    'b',
+    { model: 'opus' },
+    'ask',
+    expect.any(String),
+  );
+});
+
+it('asks for permission by default and switches to auto from settings', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await open();
+  await sendPrompt(user, 'go');
+  const runId = lastRunId();
+  expect(agent.send).toHaveBeenLastCalledWith(
+    runId,
+    'go',
+    [],
+    '/proj',
+    'b',
+    { model: 'opus' },
+    'ask',
+    expect.any(String),
+  );
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  const settings = screen.getByRole('dialog', { name: 'Settings' });
+  const ask = within(settings).getByRole('button', { name: '[ ASK ]' });
+  const auto = within(settings).getByRole('button', { name: '[ AUTO ]' });
+  expect(ask).toHaveAttribute('aria-pressed', 'true');
+  expect(auto).toHaveAttribute('aria-pressed', 'false');
+  await user.click(auto);
+  expect(auto).toHaveAttribute('aria-pressed', 'true');
+  expect(ask).toHaveAttribute('aria-pressed', 'false');
+  expect(localStorage.getItem('permission')).toBe('auto');
+  expect(agent.setPermission).toHaveBeenCalledWith(runId, 'auto');
+  await sendPrompt(user, 'more');
+  expect(agent.send).toHaveBeenLastCalledWith(
+    runId,
+    'more',
+    [],
+    '/proj',
+    'b',
+    { model: 'opus' },
+    'auto',
+    expect.any(String),
+  );
+
+  cleanup();
+  const again = await open();
+  await sendPrompt(again, 'later');
+  expect(agent.send.mock.lastCall![6]).toBe('auto');
+});
+
+const permissionCards = () =>
+  screen.queryAllByRole('group', { name: 'Permission request' });
+
+it('asks to allow a tool call and sends the answer', async () => {
+  const user = await running();
+  const runId = lastRunId();
+  act(() =>
+    emit({
+      type: 'permission',
+      request: { id: 'r1', tool: 'Bash', input: { command: 'rm -rf x\nmore' } },
+    }),
+  );
+  const [card] = permissionCards();
+  expect(card).toHaveTextContent('Bash');
+  expect(card).toHaveTextContent('rm -rf x');
+  expect(card.textContent).not.toMatch(/more/);
+  await user.click(within(card).getByRole('button', { name: '[ ALLOW ]' }));
+  expect(agent.answerPermission).toHaveBeenCalledWith(runId, 'r1', true);
+  expect(permissionCards()).toHaveLength(0);
+
+  act(() =>
+    emit({
+      type: 'permission',
+      request: {
+        id: 'r2',
+        tool: 'Write',
+        input: { file_path: '/src/a.ts' },
+        title: 'Claude wants to write to a.ts',
+      },
+    }),
+  );
+  const [titled] = permissionCards();
+  expect(titled).toHaveTextContent('Write');
+  expect(titled).toHaveTextContent('Claude wants to write to a.ts');
+  expect(titled).not.toHaveTextContent('/src/a.ts');
+  await user.click(within(titled).getByRole('button', { name: '[ DENY ]' }));
+  expect(agent.answerPermission).toHaveBeenLastCalledWith(runId, 'r2', false);
+  expect(permissionCards()).toHaveLength(0);
+});
+
+it.each([
+  ['goes idle', { type: 'state', state: 'idle' }],
+  ['ends', { type: 'end' }],
+] as [string, AgentEvent][])(
+  'drops permission cards once answered elsewhere or the session %s',
+  async (_, event) => {
+    await running();
+    act(() =>
+      emit({
+        type: 'permission',
+        request: { id: 'r1', tool: 'Bash', input: { command: 'ls' } },
+      }),
+    );
+    act(() =>
+      emit({
+        type: 'permission',
+        request: { id: 'r2', tool: 'Read', input: { file_path: '/x' } },
+      }),
+    );
+    act(() =>
+      emit({
+        type: 'permission',
+        request: { id: 'r3', tool: 'Grep', input: { pattern: 'y' } },
+      }),
+    );
+    expect(permissionCards().map((c) => c.textContent)).toEqual([
+      expect.stringContaining('Bash'),
+      expect.stringContaining('Read'),
+      expect.stringContaining('Grep'),
+    ]);
+    act(() => emit({ type: 'permission-end', id: 'r2' }));
+    expect(permissionCards().map((c) => c.textContent)).toEqual([
+      expect.stringContaining('Bash'),
+      expect.stringContaining('Grep'),
+    ]);
+    await act(async () => emit(event));
+    expect(permissionCards()).toHaveLength(0);
+  },
+);
+
+it('marks a thread as waiting while a tool call needs permission', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await running();
+  const dot = () =>
+    row(/Newest/).getByLabelText(/^(attention|running)$/).ariaLabel;
+  expect(dot()).toBe('running');
+  act(() =>
+    emit({
+      type: 'permission',
+      request: { id: 'r1', tool: 'Bash', input: { command: 'ls' } },
+    }),
+  );
+  expect(dot()).toBe('attention');
+  expect(screen.getByText('WAITING')).toBeInTheDocument();
+  expect(screen.queryByText('RUNNING')).toBeNull();
+  await user.click(screen.getByRole('button', { name: '[ ALLOW ]' }));
+  expect(dot()).toBe('running');
+  expect(screen.getByText('RUNNING')).toBeInTheDocument();
+});
+
+it('opens settings and usage one at a time and closes them on Escape or outside click', async () => {
+  agent.usage.mockResolvedValue(null);
+  const user = await open();
+  const button = screen.getByRole('button', { name: 'Settings' });
+  const settings = () => screen.queryByRole('dialog', { name: 'Settings' });
+  const usage = () => screen.queryByRole('dialog', { name: 'Usage' });
+
+  expect(button).toHaveAttribute('aria-expanded', 'false');
+  await user.click(button);
+  expect(settings()).toBeInTheDocument();
+  expect(button).toHaveAttribute('aria-expanded', 'true');
+  await user.click(button);
+  expect(settings()).toBeNull();
+
+  await user.click(button);
+  await user.keyboard('{Escape}');
+  expect(settings()).toBeNull();
+
+  await user.click(button);
+  await user.click(screen.getByRole('heading', { level: 1 }));
+  expect(settings()).toBeNull();
+
+  await user.click(button);
+  await user.click(screen.getByRole('button', { name: 'Usage' }));
+  expect(settings()).toBeNull();
+  expect(usage()).toBeInTheDocument();
+  await user.click(button);
+  expect(usage()).toBeNull();
+  expect(settings()).toBeInTheDocument();
+});
+
+it('keeps a pending permission when another thread finishes', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await open();
+  await sendPrompt(user, 'first');
+  const runB = lastRunId();
+  act(() =>
+    emit({
+      type: 'permission',
+      request: { id: 'r1', tool: 'Bash', input: { command: 'ls' } },
+    }),
+  );
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  await sendPrompt(user, 'second');
+  await act(async () => finishRun());
+  await user.click(screen.getByRole('button', { name: /Newest/ }));
+  expect(permissionCards()).toHaveLength(1);
+  await user.click(screen.getByRole('button', { name: '[ ALLOW ]' }));
+  expect(agent.answerPermission).toHaveBeenCalledWith(runB, 'r1', true);
+});
+
+it('stops the composer scanline while waiting for permission', async () => {
+  const user = await running();
+  const form = () =>
+    screen.getByPlaceholderText('Ask the agent…').closest('form')!;
+  expect(form()).toHaveClass('scanline');
+  act(() =>
+    emit({
+      type: 'permission',
+      request: { id: 'r1', tool: 'Bash', input: { command: 'ls' } },
+    }),
+  );
+  expect(form()).not.toHaveClass('scanline');
+  await user.click(screen.getByRole('button', { name: '[ ALLOW ]' }));
+  expect(form()).toHaveClass('scanline');
 });

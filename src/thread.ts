@@ -1,4 +1,9 @@
-import type { Subthread, ThreadItem } from './agent-types';
+import type {
+  Image,
+  PermissionRequest,
+  Subthread,
+  ThreadItem,
+} from './agent-types';
 
 export type ThreadState =
   | 'attention'
@@ -7,6 +12,15 @@ export type ThreadState =
   | 'running'
   | 'draft'
   | 'read';
+
+export const stateDot: Record<ThreadState, string> = {
+  attention: 'bg-warn',
+  error: 'bg-alert',
+  done: 'bg-ok',
+  running: 'animate-pulse bg-cyan',
+  draft: 'bg-draft',
+  read: 'bg-mute',
+};
 
 export interface Thread {
   id: string;
@@ -19,10 +33,15 @@ export interface Thread {
   items?: ThreadItem[];
   // Subagents spawned by runs since the thread was opened.
   subthreads?: Subthread[];
+  // Sent mid-turn; each moves into items once the CLI picks it up.
+  queued?: (Extract<ThreadItem, { type: 'user' }> & { uuid: string })[];
+  // Tool calls waiting for the user's answer, oldest first.
+  permissions?: PermissionRequest[];
   // Not yet a Claude session; id is temporary until the first run's session event.
   draft?: true;
-  // Unsent composer text.
+  // Unsent composer text and pasted images.
   prompt?: string;
+  images?: Image[];
   // Original draft id, kept as the React key so promotion doesn't remount.
   key?: string;
 }
@@ -37,8 +56,10 @@ const order: ThreadState[] = [
 ];
 
 export function threadState(thread: Thread, runningIds: string[]): ThreadState {
+  if (thread.permissions?.length) return 'attention';
   if (runningIds.includes(thread.id)) return 'running';
-  if (thread.draft && thread.prompt?.trim()) return 'draft';
+  if (thread.draft && (thread.prompt?.trim() || thread.images?.length))
+    return 'draft';
   return thread.status ?? 'read';
 }
 
