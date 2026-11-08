@@ -42,6 +42,8 @@ export interface Thread {
   // Unsent composer text and pasted images.
   prompt?: string;
   images?: Image[];
+  // Percent of the context window used, known once a run finishes a turn.
+  context?: number;
   // Original draft id, kept as the React key so promotion doesn't remount.
   key?: string;
 }

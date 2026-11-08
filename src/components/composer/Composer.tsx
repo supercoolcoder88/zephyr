@@ -54,7 +54,7 @@ function parse(prompt: string, commands: SlashCommand[]) {
 interface Props {
   cwd: string;
   running: boolean;
-  waiting: boolean;
+  history: string[];
   prompt: string;
   onPrompt(text: string): void;
   images: Image[];
@@ -67,7 +67,7 @@ interface Props {
 export default function Composer({
   cwd,
   running,
-  waiting,
+  history,
   prompt,
   onPrompt,
   images,
@@ -87,6 +87,9 @@ export default function Composer({
   );
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState(false);
+  // Steps back through sent messages; undefined while editing the draft.
+  const [recall, setRecall] = useState<number>();
+  const draft = useRef('');
   const [paths, setPaths] = useState<Record<string, 'file' | 'folder'>>({});
   const [caret, setCaret] = useState(0);
   const [completions, setCompletions] = useState<{
@@ -194,6 +197,7 @@ export default function Composer({
     setCaret(at);
     setSelected(0);
     setDismissed(false);
+    setRecall(undefined);
   }
 
   function send(text: string) {
@@ -234,7 +238,7 @@ export default function Composer({
         e.preventDefault();
         send(prompt);
       }}
-      className={`relative flex shrink-0 items-end gap-2 border-t border-line bg-panel p-3 ${running && !waiting ? 'scanline' : ''}`}
+      className="relative flex shrink-0 items-end gap-2 border-t border-line bg-panel p-3"
     >
       {options > 0 && (
         <ul
@@ -333,7 +337,7 @@ export default function Composer({
           <textarea
             ref={composer}
             autoFocus
-            rows={1}
+            rows={3}
             role="combobox"
             aria-autocomplete="list"
             aria-expanded={options > 0}
@@ -387,12 +391,35 @@ export default function Composer({
                     : complete(entries[highlighted]);
                 }
               }
+              const box = e.currentTarget;
+              const step =
+                e.key === 'ArrowUp' &&
+                !prompt.slice(0, box.selectionStart).includes('\n')
+                  ? 1
+                  : e.key === 'ArrowDown' &&
+                      recall !== undefined &&
+                      !prompt.slice(box.selectionEnd).includes('\n')
+                    ? -1
+                    : 0;
+              if (step) {
+                const next = (recall ?? -1) + step;
+                if (next >= history.length) return;
+                e.preventDefault();
+                if (recall === undefined) draft.current = prompt;
+                const text =
+                  next < 0 ? draft.current : history[history.length - 1 - next];
+                nextCaret.current = text.length;
+                edit(text);
+                setRecall(next < 0 ? undefined : next);
+                setDismissed(true);
+                return;
+              }
               if (e.key !== 'Enter' || e.shiftKey) return;
               e.preventDefault();
               send(prompt);
             }}
             placeholder="Ask the agent…"
-            className="relative block max-h-48 w-full resize-none border border-line bg-transparent px-3 py-2.25 text-sm text-transparent caret-ink [field-sizing:content] [scrollbar-gutter:stable] outline-none placeholder:text-mute focus:border-line-strong"
+            className="relative block w-full resize-none border border-line bg-transparent px-3 py-2.25 text-sm text-transparent caret-ink [scrollbar-gutter:stable] outline-none placeholder:text-mute focus:border-line-strong"
           />
         </div>
       </div>

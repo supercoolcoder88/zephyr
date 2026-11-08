@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createRef } from 'react';
+import { createRef, useState, type ComponentProps } from 'react';
 import { readFileSync } from 'node:fs';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { PermissionRequest, ThreadItem } from '../../agent-types';
@@ -22,12 +22,27 @@ beforeEach(() => {
   } as unknown as typeof window.agent;
 });
 
+// Owns the draft the way App does, since ChatThread shows whatever prompt it is given.
+function Drafted(props: ComponentProps<typeof ChatThread>) {
+  const [prompt, setPrompt] = useState(props.thread.prompt);
+  return (
+    <ChatThread
+      {...props}
+      thread={{ ...props.thread, prompt }}
+      onPrompt={(text) => {
+        setPrompt(text);
+        props.onPrompt(text);
+      }}
+    />
+  );
+}
+
 const view = (
   items: ThreadItem[],
   running = false,
   permissions?: PermissionRequest[],
 ) => (
-  <ChatThread
+  <Drafted
     thread={{
       id: 't1',
       title: 'Thread',
@@ -140,7 +155,7 @@ const renderQuote = (prompt = '') => {
   const onPrompt = vi.fn();
   const composer = createRef<HTMLTextAreaElement>();
   render(
-    <ChatThread
+    <Drafted
       thread={{
         id: 't1',
         title: 'Thread',
@@ -228,6 +243,27 @@ it('appends the quote after an existing draft', async () => {
   expect(onPrompt).toHaveBeenLastCalledWith('look at this\n\n> first line\n\n');
 });
 
+it('shows a prompt set from outside without remounting', () => {
+  const thread = { id: 't1', title: 'Thread', cwd: '/proj', updatedAt: 0 };
+  const props = {
+    running: false,
+    justFinished: false,
+    onSend: () => undefined,
+    onCancel: () => undefined,
+    onPrompt: () => undefined,
+    onImages: () => undefined,
+    onAnswer: () => undefined,
+    composer: { current: null },
+  };
+  const { rerender } = render(<ChatThread thread={thread} {...props} />);
+  const box = screen.getByRole('combobox');
+  rerender(<ChatThread thread={{ ...thread, prompt: 'ship' }} {...props} />);
+  expect(screen.getByRole('combobox')).toBe(box);
+  expect(box).toHaveValue('ship');
+  rerender(<ChatThread thread={thread} {...props} />);
+  expect(box).toHaveValue('');
+});
+
 it('hides the copy button when the selection clears or the transcript scrolls', () => {
   renderQuote();
   const line = screen.getByText('first line');
@@ -246,7 +282,7 @@ it('offers stop and queueing while running', async () => {
   const onSend = vi.fn();
   const onCancel = vi.fn();
   render(
-    <ChatThread
+    <Drafted
       thread={{
         id: 't1',
         title: 'Thread',
@@ -290,4 +326,37 @@ it('scrolls a new permission card into view when pinned to the bottom', () => {
     screen.getByRole('group', { name: 'Permission request' }),
   ).toBeTruthy();
   expect(scroller.scrollTop).toBe(500);
+});
+
+it('steps through sent messages with the arrow keys and restores the draft', async () => {
+  const user = userEvent.setup();
+  render(
+    view([
+      { type: 'user', text: 'first' },
+      { type: 'text', text: 'reply' },
+      { type: 'user', text: 'second\nline' },
+    ]),
+  );
+  const box = screen.getByRole<HTMLTextAreaElement>('combobox');
+  await user.type(box, 'draft');
+  await user.keyboard('{Home}{ArrowUp}');
+  expect(box).toHaveValue('second\nline');
+  box.setSelectionRange(0, 0);
+  await user.keyboard('{ArrowUp}');
+  expect(box).toHaveValue('first');
+  await user.keyboard('{ArrowUp}');
+  expect(box).toHaveValue('first');
+  await user.keyboard('{ArrowDown}');
+  expect(box).toHaveValue('second\nline');
+  await user.keyboard('{ArrowDown}');
+  expect(box).toHaveValue('draft');
+});
+
+it('only recalls from the first line of a multi-line draft', async () => {
+  const user = userEvent.setup();
+  render(view([{ type: 'user', text: 'old' }]));
+  const box = screen.getByRole<HTMLTextAreaElement>('combobox');
+  await user.type(box, 'a{Shift>}{Enter}{/Shift}b');
+  await user.keyboard('{ArrowUp}');
+  expect(box).toHaveValue('a\nb');
 });

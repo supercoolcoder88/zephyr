@@ -1,7 +1,7 @@
 // See the Electron documentation for details on how to use preload scripts:
 // https://www.electronjs.org/docs/latest/tutorial/process-model#preload-scripts
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { AgentApi, AgentEvent } from './agent-types';
+import type { AgentApi, AgentEvent, Todo, TodoApi } from './agent-types';
 
 const agent: AgentApi = {
   send: (runId, prompt, images, cwd, resume, choice, permission, uuid) =>
@@ -42,4 +42,16 @@ const agent: AgentApi = {
   },
 };
 
+const todos: TodoApi = {
+  watch: (cwd) => ipcRenderer.invoke('todos:watch', cwd),
+  edit: (cwd, edit) => ipcRenderer.invoke('todos:edit', cwd, edit),
+  onChange: (listener) => {
+    const handler = (_: IpcRendererEvent, cwd: string, list: Todo[]) =>
+      listener(cwd, list);
+    ipcRenderer.on('todos:change', handler);
+    return () => ipcRenderer.off('todos:change', handler);
+  },
+};
+
 contextBridge.exposeInMainWorld('agent', agent);
+contextBridge.exposeInMainWorld('todos', todos);

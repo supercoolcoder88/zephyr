@@ -3,11 +3,11 @@
 
 /* Tokens and rules are documented in STYLES.md. */
 @theme {
-  --color-void: #000;
-  --color-panel: #0a0a0a;
-  --color-line: #1f1f1f;
-  --color-line-strong: #3a3a3a;
-  --color-mute: #6b6b6b;
+  --color-void: #0e0e0e;
+  --color-panel: #161616;
+  --color-line: #262626;
+  --color-line-strong: #404040;
+  --color-mute: #737373;
   --color-ink: #ededed;
   --color-paper: #fff;
   --color-cyan: #00e5ff;
@@ -133,38 +133,9 @@
   clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
 }
 
-/* Cyan sweep along an element's top edge while the agent runs. */
-@utility scanline {
-  position: relative;
-  &::before {
-    content: '';
-    position: absolute;
-    top: -1px;
-    left: 0;
-    height: 1px;
-    width: 30%;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      var(--color-cyan-deep),
-      var(--color-cyan)
-    );
-    animation: scan 1.4s var(--ease-mech) infinite;
-  }
-}
-
 /* One-shot glow pulse when a run completes. */
 @utility flash {
   animation: flash 400ms var(--ease-mech) 1;
-}
-
-@keyframes scan {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(340%);
-  }
 }
 
 @keyframes flash {

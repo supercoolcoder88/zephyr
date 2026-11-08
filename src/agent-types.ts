@@ -18,7 +18,9 @@ export type AgentEvent =
   | { type: 'subthread-output'; id: string; output: Output }
   | { type: 'subthread-end'; id: string; ok: boolean }
   | { type: 'permission'; request: PermissionRequest }
-  | { type: 'permission-end'; id: string };
+  | { type: 'permission-end'; id: string }
+  // Percent of the context window in use after the last turn.
+  | { type: 'context'; percentage: number };
 
 // Claude Code permission modes the user can switch between.
 export type Permission =
@@ -50,6 +52,7 @@ export type ThreadItem =
           | 'state'
           | 'picked'
           | 'end'
+          | 'context'
           | `subthread${string}`
           | `permission${string}`;
       }
@@ -127,4 +130,25 @@ export interface AgentApi {
   ): Promise<{ id: string; title: string; updatedAt: number }[]>;
   loadThread(sessionId: string, cwd: string): Promise<ThreadItem[]>;
   deleteThread(sessionId: string, cwd: string): Promise<void>;
+}
+
+// A `- [ ]` line of the project's .zephyr/todos.md; line is its 0-based index there.
+export interface Todo {
+  line: number;
+  text: string;
+  done: boolean;
+}
+
+export type TodoEdit =
+  | { type: 'add'; text: string }
+  | { type: 'toggle' | 'remove'; todo: Todo }
+  | { type: 'rename'; todo: Todo; text: string }
+  // Moves the todo and its nested lines to just before `before`, or after the last todo.
+  | { type: 'move'; todo: Todo; before?: Todo };
+
+export interface TodoApi {
+  // Starts watching cwd's todo file, replacing the previous watch, and resolves its todos.
+  watch(cwd: string): Promise<Todo[]>;
+  edit(cwd: string, edit: TodoEdit): Promise<Todo[]>;
+  onChange(listener: (cwd: string, todos: Todo[]) => void): () => void;
 }

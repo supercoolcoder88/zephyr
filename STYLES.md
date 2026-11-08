@@ -10,11 +10,11 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 
 | Token         | Value       | Use                                            |
 | ------------- | ----------- | ---------------------------------------------- |
-| `void`        | `#000000`   | App background                                 |
-| `panel`       | `#0A0A0A`   | Raised surfaces (sidebar, composer)            |
-| `line`        | `#1F1F1F`   | 1px hairlines, dividers, grid                  |
-| `line-strong` | `#3A3A3A`   | Hover and active borders                       |
-| `mute`        | `#6B6B6B`   | Secondary text, indices, metadata              |
+| `void`        | `#0E0E0E`   | App background                                 |
+| `panel`       | `#161616`   | Raised surfaces (sidebar, composer)            |
+| `line`        | `#262626`   | 1px hairlines, dividers, grid                  |
+| `line-strong` | `#404040`   | Hover and active borders                       |
+| `mute`        | `#737373`   | Secondary text, indices, metadata              |
 | `ink`         | `#EDEDED`   | Primary text                                   |
 | `paper`       | `#FFFFFF`   | Inverted blocks, primary button                |
 | `cyan`        | `#00E5FF`   | Key moments only                               |
@@ -49,6 +49,8 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 - Bracket small controls and indices: `[ SEND ]`, `[ + NEW ]`, `01`.
 - Dense spacing on a 4px base. This is a tool, not a landing page.
 - A chamfered corner (`.chamfer`) is allowed on at most one primary element per view.
+- Icons come from `lucide-react` at 14px with a 1.5 stroke, `strokeLinecap="square"` and `strokeLinejoin="miter"`. Use one only where a glyph reads better than a bracketed label (panel toggle, drag grip).
+- Drag and drop: a drop zone is a 1px `border-line-strong` box on `bg-panel` with a bracketed label, inverted while dragged over. An insertion point is a 1px `bg-ink` line, and the dragged source dims to `opacity-50`.
 
 ## Component architecture
 
@@ -63,7 +65,7 @@ Follows the shadcn/ui approach without the library: the app owns a small set of 
 
 ### Primitives
 
-- **Button** (`ui/Button.tsx`) for every bracketed control. Variants: `ghost` (default, mute → ink, ink while `aria-expanded`), `primary` (inverted paper block), `destructive` (mute → alert), `outline-destructive` (alert outline, fills on hover). Sizes: `inline` (default, no box), `sm` h-6, `md` h-8, `lg` h-10, which matches the composer textarea.
+- **Button** (`ui/Button.tsx`) for every bracketed control. Variants: `ghost` (default, mute → ink, ink while `aria-expanded`), `primary` (inverted paper block), `destructive` (mute → alert), `outline-destructive` (alert outline, fills on hover). Sizes: `inline` (default, no box), `sm` h-6, `md` h-8, `lg` h-10, which matches a one-line input.
 - **MenuItem** (`ui/MenuItem.tsx`) for menu rows: a `menuitemradio` with the `>` checked marker. Focus follows the pointer and the row inverts from `focus:` only, so exactly one row is highlighted.
 - **useDismiss** (`ui/useDismiss.ts`): `useDismiss(ref, open, onClose)`.
 - **Popover surface** (menus, listboxes, usage): `bg-panel`, `border-line` hairline, `py-1`; drop the edge that sits on an existing hairline (`border-b-0` above the composer or footer, only `border-t` when spanning the full width). Items are `px-3 py-1 text-sm`, highlighted by inversion (`bg-paper text-void`), checked `text-ink`, the rest `text-mute`.
@@ -72,7 +74,7 @@ Follows the shadcn/ui approach without the library: the app owns a small set of 
 
 | Moment           | Treatment                                                                |
 | ---------------- | ------------------------------------------------------------------------ |
-| Agent running    | Cyan scanline sweeps the composer's top edge; status word turns cyan     |
+| Agent running    | Cyan block-character wave at the end of the transcript; status word cyan |
 | Streaming output | Newest agent line gets a cyan left rule; it drops to `line` once stale   |
 | Tool in flight   | Tool name in its one-line mute summary turns cyan until the run moves on |
 | Run completes    | One `.flash` glow pulse (~400ms) on the finished turn, then monochrome   |

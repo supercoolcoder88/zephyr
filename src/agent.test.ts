@@ -186,6 +186,7 @@ function fakeQuery({ prompt }: { prompt: AsyncIterable<unknown> }) {
     setModel: vi.fn(async () => undefined),
     applyFlagSettings: vi.fn(async () => undefined),
     setPermissionMode: vi.fn(async () => undefined),
+    getContextUsage: vi.fn(async () => ({ percentage: 12 })),
     close: vi.fn(() => q.step({ error: new Error('aborted') })),
     async *[Symbol.asyncIterator]() {
       while (true) {
@@ -374,8 +375,9 @@ describe('agent:send', () => {
       { type: 'system', subtype: 'session_state_changed', state: 'idle' },
     ])
       q.step({ value });
-    await vi.waitFor(() => expect(s.sent).toHaveLength(11));
-    expect(s.sent).toEqual([
+    await vi.waitFor(() => expect(s.sent).toHaveLength(12));
+    expect(s.sent).toContainEqual(['s4', { type: 'context', percentage: 12 }]);
+    expect(s.sent.filter(([, e]) => (e as { type: string }).type !== 'context')).toEqual([
       ['s4', { type: 'session', sessionId: 'sid' }],
       ['s4', { type: 'state', state: 'running' }],
       ['s4', { type: 'picked', ids: ['uuid-go'] }],
@@ -703,4 +705,27 @@ describe('idle queries', () => {
       );
     },
   );
+});
+
+describe('workspace:complete', () => {
+  it('only suggests entries inside the project', async () => {
+    const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const path = await import('node:path');
+    const root = await mkdtemp(path.join(tmpdir(), 'zephyr-'));
+    const proj = path.join(root, 'proj');
+    await mkdir(path.join(proj, 'src'), { recursive: true });
+    await writeFile(path.join(proj, 'src', 'a.ts'), '');
+    await writeFile(path.join(root, 'secret.txt'), '');
+
+    expect(await invoke('workspace:complete', proj, 's')).toEqual(['src/']);
+    expect(await invoke('workspace:complete', proj, 'src/')).toEqual([
+      'src/a.ts',
+    ]);
+    expect(await invoke('workspace:complete', proj, 'src/../src/')).toEqual([
+      'src/../src/a.ts',
+    ]);
+    for (const partial of ['../', '../../', '~/', `${root}/`, '/'])
+      expect(await invoke('workspace:complete', proj, partial)).toEqual([]);
+  });
 });

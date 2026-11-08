@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { flushSync } from 'react-dom';
 import ChatThread from './components/chat/ChatThread';
 import Sidebar from './components/sidebar/Sidebar';
+import Todos, { todoType } from './components/todos/Todos';
 import Button from './components/ui/Button';
 import type { Image, ModelChoice, Permission, ThreadItem } from './agent-types';
 import { newThread, sortThreads, type Thread } from './thread';
@@ -35,6 +37,7 @@ function merge(
         key: known?.key,
         prompt: known?.prompt,
         images: known?.images,
+        context: known?.context,
       };
     }),
   ];
@@ -47,6 +50,7 @@ export default function App() {
   const [runningIds, setRunningIds] = useState<string[]>([]);
   const [finishedId, setFinishedId] = useState<string>();
   const [deleteError, setDeleteError] = useState<string>();
+  const [dragging, setDragging] = useState<boolean | 'over'>(false);
   const [permission, setPermission] = useState(
     () => (localStorage.getItem('mode') ?? 'auto') as Permission,
   );
@@ -179,6 +183,9 @@ export default function App() {
             ...t,
             permissions: [...(t.permissions ?? []), event.request],
           }));
+        }
+        if (event.type === 'context') {
+          return patch(run.id, (t) => ({ ...t, context: event.percentage }));
         }
         if (event.type === 'permission-end') {
           return dropPermission(run.id, event.id);
@@ -324,7 +331,7 @@ export default function App() {
     );
   }
 
-  function create() {
+  function create(prompt?: string) {
     if (!workspace) return;
     const empty = visible.find(
       (t) =>
@@ -334,14 +341,20 @@ export default function App() {
         !t.images?.length,
     );
     if (empty) {
+      if (prompt !== undefined) patch(empty.id, (t) => ({ ...t, prompt }));
       select(empty);
       composer.current?.focus();
       return;
     }
     const thread = newThread(workspace);
-    setThreads((prev) => [thread, ...prev]);
+    setThreads((prev) => [{ ...thread, prompt }, ...prev]);
     select(thread);
   }
+
+  const todoText = (e: DragEvent) =>
+    e.dataTransfer.types.includes(todoType)
+      ? e.dataTransfer.getData('text/plain')
+      : undefined;
 
   async function remove(id: string) {
     const thread = visible.find((t) => t.id === id)!;
@@ -413,7 +426,7 @@ export default function App() {
   }
 
   return (
-    <main className="flex h-screen overflow-hidden bg-void text-ink">
+    <main className="relative flex h-screen overflow-hidden bg-void text-ink">
       <Sidebar
         workspace={active.cwd}
         onOpenWorkspace={openWorkspace}
@@ -421,7 +434,7 @@ export default function App() {
         activeId={active.id}
         runningIds={runningIds}
         onSelect={(id) => select(visible.find((t) => t.id === id)!)}
-        onNew={create}
+        onNew={() => create()}
         onDelete={remove}
         error={deleteError}
         permission={permission}
@@ -433,32 +446,77 @@ export default function App() {
           }
         }}
       />
-      <ChatThread
-        key={active.key ?? active.id}
-        thread={active}
-        running={runningIds.includes(active.id)}
-        justFinished={finishedId === active.id}
-        onSend={send}
-        onPrompt={(prompt) => patch(active.id, (t) => ({ ...t, prompt }))}
-        onImages={(update) =>
-          patch(active.id, (t) => ({ ...t, images: update(t.images ?? []) }))
-        }
-        onCancel={() => {
-          const runId = runOf(active.id);
-          const run = runId && runs.current.get(runId);
-          if (!run) return;
-          run.stopping = run.running;
-          patch(active.id, (t) => ({ ...t, queued: undefined }));
-          window.agent.interrupt(runId).catch(report(active.id));
-        }}
-        onAnswer={(id, allow) => {
-          dropPermission(active.id, id);
-          window.agent
-            .answerPermission(runOf(active.id)!, id, allow)
-            .catch(report(active.id));
-        }}
-        composer={composer}
-      />
+      {dragging && (
+        <div
+          data-over={dragging === 'over' || undefined}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes(todoType)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            setDragging('over');
+          }}
+          onDragLeave={() => setDragging(true)}
+          onDrop={(e) => {
+            const text = todoText(e);
+            if (text === undefined) return;
+            e.preventDefault();
+            create(text);
+          }}
+          className="absolute inset-y-0 left-0 z-10 flex w-60 items-center justify-center border border-line-strong bg-panel text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech data-over:bg-paper data-over:text-void"
+        >
+          [ + NEW THREAD ]
+        </div>
+      )}
+      <Todos cwd={active.cwd} onDragging={setDragging}>
+        <div
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes(todoType)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+          }}
+          onDrop={(e) => {
+            const text = todoText(e);
+            if (text === undefined) return;
+            e.preventDefault();
+            const prompt = active.prompt?.trimEnd();
+            const next = prompt ? `${prompt}\n${text}` : text;
+            flushSync(() => patch(active.id, (t) => ({ ...t, prompt: next })));
+            composer.current?.focus();
+            composer.current?.setSelectionRange(next.length, next.length);
+          }}
+          className="flex min-w-0 flex-1"
+        >
+          <ChatThread
+            key={active.key ?? active.id}
+            thread={active}
+            running={runningIds.includes(active.id)}
+            justFinished={finishedId === active.id}
+            onSend={send}
+            onPrompt={(prompt) => patch(active.id, (t) => ({ ...t, prompt }))}
+            onImages={(update) =>
+              patch(active.id, (t) => ({
+                ...t,
+                images: update(t.images ?? []),
+              }))
+            }
+            onCancel={() => {
+              const runId = runOf(active.id);
+              const run = runId && runs.current.get(runId);
+              if (!run) return;
+              run.stopping = run.running;
+              patch(active.id, (t) => ({ ...t, queued: undefined }));
+              window.agent.interrupt(runId).catch(report(active.id));
+            }}
+            onAnswer={(id, allow) => {
+              dropPermission(active.id, id);
+              window.agent
+                .answerPermission(runOf(active.id)!, id, allow)
+                .catch(report(active.id));
+            }}
+            composer={composer}
+          />
+        </div>
+      </Todos>
     </main>
   );
 }

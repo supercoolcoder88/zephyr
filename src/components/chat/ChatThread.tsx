@@ -39,7 +39,7 @@ export default function ChatThread({
   onAnswer,
   composer,
 }: Props) {
-  const [prompt, setPrompt] = useState(thread.prompt ?? '');
+  const prompt = thread.prompt ?? '';
   const scroller = useRef<HTMLDivElement>(null);
   // Follow new output only while the user is at the bottom.
   const pinned = useRef(true);
@@ -85,7 +85,7 @@ export default function ChatThread({
     const lines = text.split('\n').map((l) => (l ? `> ${l}` : '>'));
     const draft = prompt.trimEnd();
     const next = `${draft ? `${draft}\n\n` : ''}${lines.join('\n')}\n\n`;
-    flushSync(() => edit(next));
+    flushSync(() => onPrompt(next));
     document.getSelection()?.removeAllRanges();
     setQuote(undefined);
     const box = composer.current;
@@ -93,28 +93,17 @@ export default function ChatThread({
     box?.setSelectionRange(next.length, next.length);
   }
 
-  function edit(text: string) {
-    setPrompt(text);
-    onPrompt(text);
-  }
-
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-6">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-line px-6">
         <h1 className="truncate text-2xs tracking-widest uppercase">
           {thread.title}
         </h1>
-        <span
-          className={`text-2xs tracking-widest ${
-            permissions.length
-              ? 'text-ink'
-              : running
-                ? 'text-cyan'
-                : 'text-mute'
-          }`}
-        >
-          {permissions.length ? 'WAITING' : running ? 'RUNNING' : 'IDLE'}
-        </span>
+        {thread.context !== undefined && (
+          <span className="shrink-0 text-2xs tracking-widest text-mute">
+            {Math.round(thread.context)}% USED
+          </span>
+        )}
       </header>
 
       <div
@@ -214,6 +203,7 @@ export default function ChatThread({
                 <Item item={item} live={false} />
               </div>
             ))}
+            {running && !permissions.length && <Wave />}
             {permissions.map((request) => (
               <div
                 key={request.id}
@@ -277,9 +267,11 @@ export default function ChatThread({
       <Composer
         cwd={thread.cwd}
         running={running}
-        waiting={permissions.length > 0}
+        history={[...items, ...(thread.queued ?? [])].flatMap((i) =>
+          i.type === 'user' && i.text ? [i.text] : [],
+        )}
         prompt={prompt}
-        onPrompt={edit}
+        onPrompt={onPrompt}
         images={thread.images ?? []}
         onImages={onImages}
         onSend={(text, images, choice) => {
@@ -305,3 +297,25 @@ function groupTurns(items: ThreadItem[]) {
 
 const toggle = (list: number[], n: number) =>
   list.includes(n) ? list.filter((x) => x !== n) : [...list, n];
+
+const bars = '▁▂▃▄';
+
+function Wave() {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFrame((f) => f + 1), 120);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <p
+      role="status"
+      aria-label="Working"
+      className="text-right text-2xs text-cyan"
+    >
+      {Array.from(
+        { length: 12 },
+        (_, i) => bars[Math.round((Math.sin((i - frame) * 0.4) + 1) * 1.5)],
+      ).join('')}
+    </p>
+  );
+}

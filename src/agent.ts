@@ -327,6 +327,13 @@ export function registerAgentIpc() {
               }
             }
             forward(target, runId, m);
+            if (m.type === 'result') {
+              q.getContextUsage({ detail: 'summary' })
+                .then(({ percentage }) =>
+                  send(target, runId, { type: 'context', percentage }),
+                )
+                .catch(() => {});
+            }
           }
         } catch (err) {
           if (!closed) {
@@ -403,10 +410,14 @@ export function registerAgentIpc() {
       );
       const dir = partial.slice(0, slash + 1);
       const prefix = partial.slice(slash + 1).toLowerCase();
-      const full = path.resolve(
-        cwd,
-        dir.replace(/^~(?=$|[\\/])/, os.homedir()) || '.',
-      );
+      const full = path.resolve(cwd, dir || '.');
+      const rel = path.relative(cwd, full);
+      if (
+        rel === '..' ||
+        rel.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(rel)
+      )
+        return [];
       const entries = await readdir(full, { withFileTypes: true }).catch(
         () => [],
       );
