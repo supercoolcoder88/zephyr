@@ -19,6 +19,14 @@ interface Props {
 // Read threads past this many are tucked into the archive at the bottom.
 const KEEP_INACTIVE = 3;
 
+const modes: [Permission, string][] = [
+  ['auto', 'Auto'],
+  ['default', 'Ask'],
+  ['acceptEdits', 'Accept edits'],
+  ['plan', 'Plan'],
+  ['bypassPermissions', 'Bypass'],
+];
+
 const nextTheme: Record<string, string> = {
   dark: 'cyber',
   cyber: 'light',
@@ -45,10 +53,10 @@ export default function Sidebar({
   const [usage, setUsage] = useState<
     'closed' | 'loading' | 'error' | UsageWindow[] | null
   >('closed');
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
   const footer = useRef<HTMLElement>(null);
   const usageOpen = usage !== 'closed';
-  const popupOpen = usageOpen || settingsOpen;
+  const popupOpen = usageOpen || modeOpen;
 
   useEffect(() => {
     if (!popupOpen) return;
@@ -59,7 +67,7 @@ export default function Sidebar({
           : !footer.current?.contains(e.target as Node)
       ) {
         setUsage('closed');
-        setSettingsOpen(false);
+        setModeOpen(false);
       }
     };
     document.addEventListener('pointerdown', close);
@@ -71,7 +79,7 @@ export default function Sidebar({
   }, [popupOpen]);
 
   function toggleUsage() {
-    setSettingsOpen(false);
+    setModeOpen(false);
     if (usageOpen) return setUsage('closed');
     setUsage('loading');
     window.agent.usage(workspace).then(
@@ -228,31 +236,34 @@ export default function Sidebar({
             )}
           </div>
         )}
-        {settingsOpen && (
-          <div
-            role="dialog"
-            aria-label="Settings"
-            className="absolute inset-x-0 bottom-full flex items-center justify-between border-t border-line bg-panel px-4 py-3 text-2xs tracking-widest uppercase"
+        {modeOpen && (
+          <ul
+            role="menu"
+            aria-label="Permission mode"
+            className="absolute inset-x-0 bottom-full border-t border-line bg-panel py-1 text-2xs tracking-widest uppercase"
           >
-            <span>Permissions</span>
-            <span className="flex gap-1">
-              {(['ask', 'auto'] as const).map((p) => (
+            {modes.map(([value, label]) => (
+              <li key={value}>
                 <button
-                  key={p}
                   type="button"
-                  aria-pressed={permission === p}
-                  onClick={() => onPermission(p)}
-                  className={`px-1 transition-colors duration-150 ease-mech ${
-                    permission === p
-                      ? 'bg-paper text-void'
-                      : 'text-mute hover:text-ink'
+                  role="menuitemradio"
+                  aria-checked={permission === value}
+                  onClick={() => {
+                    onPermission(value);
+                    setModeOpen(false);
+                  }}
+                  className={`flex w-full gap-2 px-4 py-1 text-left transition-colors duration-150 ease-mech hover:bg-paper hover:text-void ${
+                    permission === value ? 'text-ink' : 'text-mute'
                   }`}
                 >
-                  [ {p.toUpperCase()} ]
+                  <span aria-hidden className="w-2">
+                    {permission === value && '>'}
+                  </span>
+                  {label}
                 </button>
-              ))}
-            </span>
-          </div>
+              </li>
+            ))}
+          </ul>
         )}
         <button
           type="button"
@@ -302,23 +313,13 @@ export default function Sidebar({
           type="button"
           onClick={() => {
             setUsage('closed');
-            setSettingsOpen(!settingsOpen);
+            setModeOpen(!modeOpen);
           }}
-          aria-label="Settings"
-          aria-expanded={settingsOpen}
-          className={`transition-colors duration-150 ease-mech hover:text-ink ${!settingsOpen ? 'text-mute' : 'text-ink'}`}
+          aria-haspopup="menu"
+          aria-expanded={modeOpen}
+          className={`ml-auto text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech hover:text-ink ${!modeOpen ? 'text-mute' : 'text-ink'}`}
         >
-          <svg
-            viewBox="0 0 16 16"
-            className="size-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="bevel"
-          >
-            <path d="M14.7 6.1v3.8l-1.8-.1-.9 1.5 1 1.6-3.3 1.9-.9-1.7H7.2l-.9 1.7L3 12.9l1-1.6-.9-1.5-1.8.1V6.1l1.8.1.9-1.5-1-1.6 3.3-1.9.9 1.7h1.6l.9-1.7L13 3.1l-1 1.6.9 1.5Z" />
-            <rect x="6" y="6" width="4" height="4" />
-          </svg>
+          [ {modes.find(([m]) => m === permission)?.[1] ?? permission} ]
         </button>
       </footer>
     </aside>

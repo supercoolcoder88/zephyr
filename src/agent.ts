@@ -5,7 +5,7 @@ import {
   ipcMain,
   type WebContents,
 } from 'electron';
-import { stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type {
@@ -58,9 +58,6 @@ function options(cwd: string): Options {
     allowDangerouslySkipPermissions: true,
   };
 }
-
-const mode = (permission: Permission) =>
-  permission === 'auto' ? 'bypassPermissions' : 'default';
 
 const IDLE_MS = 10 * 60_000;
 const MAX_SESSIONS = 4;
@@ -253,7 +250,7 @@ export function registerAgentIpc() {
           resume,
           model,
           effort,
-          permissionMode: mode(permission),
+          permissionMode: permission,
           canUseTool: (tool, input, { signal, requestId, title }) =>
             new Promise((resolve) => {
               session.busy();
@@ -306,7 +303,7 @@ export function registerAgentIpc() {
         async setPermission(next: Permission) {
           if (next === this.permission) return;
           this.permission = next;
-          await q.setPermissionMode(mode(next));
+          await q.setPermissionMode(next);
         },
         answers,
         idle: false,
@@ -397,6 +394,38 @@ export function registerAgentIpc() {
     },
   );
 
+  ipcMain.handle(
+    'workspace:complete',
+    async (_, cwd: string, partial: string) => {
+      const slash = Math.max(
+        partial.lastIndexOf('/'),
+        partial.lastIndexOf('\\'),
+      );
+      const dir = partial.slice(0, slash + 1);
+      const prefix = partial.slice(slash + 1).toLowerCase();
+      const full = path.resolve(
+        cwd,
+        dir.replace(/^~(?=$|[\\/])/, os.homedir()) || '.',
+      );
+      const entries = await readdir(full, { withFileTypes: true }).catch(
+        () => [],
+      );
+      return entries
+        .filter(
+          (e) =>
+            e.name.toLowerCase().startsWith(prefix) &&
+            (prefix.startsWith('.') || !e.name.startsWith('.')),
+        )
+        .map((e) => dir + e.name + (e.isDirectory() ? '/' : ''))
+        .sort(
+          (a, b) =>
+            Number(b.endsWith('/')) - Number(a.endsWith('/')) ||
+            a.localeCompare(b),
+        )
+        .slice(0, 50);
+    },
+  );
+
   ipcMain.handle('threads:list', async (_, cwd: string) => {
     const { listSessions } = await loadSdk();
     const sessions = await listSessions({ dir: cwd });
@@ -478,8 +507,9 @@ export function registerAgentIpc() {
     ): Promise<{ commands: SlashCommand[]; models: Model[] }> => {
       const idle = await idleQuery(cwd);
       try {
-        const [{ skills }, models] = await Promise.all([
-          idle.reloadSkills(),
+        // supportedCommands also lists skills only the user can invoke; reloading first picks up new ones on disk.
+        const [commands, models] = await Promise.all([
+          idle.reloadSkills().then(() => idle.supportedCommands()),
           idle.supportedModels(),
         ]);
         // getSettings is in the SDK runtime but not its types.
@@ -507,7 +537,8 @@ export function registerAgentIpc() {
           });
         }
         return {
-          commands: skills
+          commands: commands
+            .filter((c) => !c.name.startsWith('_'))
             .map(({ name, description, argumentHint }) => ({
               name,
               description,

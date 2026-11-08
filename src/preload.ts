@@ -23,6 +23,8 @@ const agent: AgentApi = {
   pickWorkspace: () => ipcRenderer.invoke('workspace:pick'),
   paths: (cwd, candidates) =>
     ipcRenderer.invoke('workspace:paths', cwd, candidates),
+  complete: (cwd, partial) =>
+    ipcRenderer.invoke('workspace:complete', cwd, partial),
   catalog: (cwd) => ipcRenderer.invoke('agent:catalog', cwd),
   interrupt: (runId) => ipcRenderer.invoke('agent:interrupt', runId),
   close: (runId) => ipcRenderer.invoke('agent:close', runId),

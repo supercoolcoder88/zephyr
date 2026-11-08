@@ -4,7 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type Ref,
+  type RefObject,
 } from 'react';
 import { flushSync } from 'react-dom';
 import type { Image, ModelChoice, ThreadItem } from '../../agent-types';
@@ -22,7 +22,7 @@ interface Props {
   onPrompt(text: string): void;
   onImages(update: (images: Image[]) => Image[]): void;
   onAnswer(id: string, allow: boolean): void;
-  composer: Ref<HTMLTextAreaElement>;
+  composer: RefObject<HTMLTextAreaElement | null>;
 }
 
 export default function ChatThread({
@@ -85,7 +85,7 @@ export default function ChatThread({
     flushSync(() => edit(next));
     document.getSelection()?.removeAllRanges();
     setQuote(undefined);
-    const box = typeof composer === 'object' ? composer?.current : null;
+    const box = composer.current;
     box?.focus();
     box?.setSelectionRange(next.length, next.length);
   }

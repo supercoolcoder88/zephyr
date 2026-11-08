@@ -43,7 +43,7 @@ const view = (
     onPrompt={() => undefined}
     onImages={() => undefined}
     onAnswer={() => undefined}
-    composer={null}
+    composer={{ current: null }}
   />
 );
 
@@ -261,7 +261,7 @@ it('offers stop and queueing while running', async () => {
       onPrompt={() => undefined}
       onImages={() => undefined}
       onAnswer={() => undefined}
-      composer={null}
+      composer={{ current: null }}
     />,
   );
   const send = screen.getByRole('button', { name: '[ SEND ]' });

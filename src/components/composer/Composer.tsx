@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type Ref } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import type {
   AgentApi,
   Image,
@@ -28,7 +34,7 @@ interface Segment {
   path?: string;
 }
 
-// Splits the prompt into plain text, a leading slash command and words that look like paths.
+// Splits the prompt into plain text, a leading slash command and @ paths.
 function parse(prompt: string, commands: SlashCommand[]) {
   return prompt.split(/(\s+)/).flatMap((word, i): Segment[] => {
     if (!word || /\s/.test(word)) return [{ text: word }];
@@ -37,11 +43,8 @@ function parse(prompt: string, commands: SlashCommand[]) {
     const [, before, core, after] = /^([`'"(]*)(.*?)([`'",.;:!?)]*)$/.exec(
       word,
     )!;
-    const path = core.replace(/^@/, '');
-    const looksLikePath =
-      core.startsWith('@') || /[/\\]/.test(core) || /\.\w+$/.test(core);
-    if (!path || !looksLikePath || core.includes('://'))
-      return [{ text: word }];
+    const path = core.slice(1);
+    if (!core.startsWith('@') || !path) return [{ text: word }];
     return [{ text: before }, { text: core, path }, { text: after }];
   });
 }
@@ -56,7 +59,7 @@ interface Props {
   onImages(update: (images: Image[]) => Image[]): void;
   onSend(prompt: string, images: Image[], choice: ModelChoice): void;
   onCancel(): void;
-  composer: Ref<HTMLTextAreaElement>;
+  composer: RefObject<HTMLTextAreaElement | null>;
 }
 
 export default function Composer({
@@ -83,6 +86,12 @@ export default function Composer({
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [paths, setPaths] = useState<Record<string, 'file' | 'folder'>>({});
+  const [caret, setCaret] = useState(0);
+  const [completions, setCompletions] = useState<{
+    partial: string;
+    entries: string[];
+  }>();
+  const nextCaret = useRef<number>(undefined);
   const menu = useRef<HTMLUListElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
 
@@ -106,7 +115,17 @@ export default function Composer({
               c.name.toLowerCase().includes(typed),
           ),
         ];
-  const highlighted = Math.min(selected, matches.length - 1);
+  // The @ path being typed at the caret.
+  const at = dismissed
+    ? undefined
+    : /(?:^|\s)@(\S*)$/.exec(prompt.slice(0, caret));
+  const partial = at?.[1];
+  const entries =
+    partial !== undefined && completions?.partial === partial
+      ? completions.entries.filter((e) => e !== partial)
+      : [];
+  const options = matches.length ? matches.length : entries.length;
+  const highlighted = Math.min(selected, options - 1);
 
   useEffect(() => {
     let catalog = catalogs.get(cwd);
@@ -146,11 +165,30 @@ export default function Composer({
   }, [cwd, lookup]);
 
   useEffect(() => {
+    if (partial === undefined) return;
+    let live = true;
+    window.agent.complete(cwd, partial).then(
+      (found) => live && setCompletions({ partial, entries: found }),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [cwd, partial]);
+
+  useLayoutEffect(() => {
+    if (nextCaret.current === undefined) return;
+    composer.current?.setSelectionRange(nextCaret.current, nextCaret.current);
+    nextCaret.current = undefined;
+  });
+
+  useEffect(() => {
     menu.current?.children[highlighted]?.scrollIntoView({ block: 'nearest' });
   }, [highlighted]);
 
-  function edit(text: string) {
+  function edit(text: string, at = text.length) {
     onPrompt(text);
+    setCaret(at);
     setSelected(0);
     setDismissed(false);
   }
@@ -171,6 +209,20 @@ export default function Composer({
   function pick(command: SlashCommand, run: boolean) {
     if (run && !command.argumentHint) return send(`/${command.name}`);
     edit(`/${command.name} `);
+  }
+
+  // Folders stay open for the next segment; files end the path.
+  function complete(entry: string) {
+    const start = caret - partial!.length;
+    const insert = entry.endsWith('/') ? entry : `${entry} `;
+    const rest = prompt.slice(caret);
+    nextCaret.current = start + insert.length;
+    edit(
+      prompt.slice(0, start) +
+        insert +
+        (insert.endsWith(' ') ? rest.replace(/^ /, '') : rest),
+      nextCaret.current,
+    );
   }
 
   return (
@@ -208,6 +260,33 @@ export default function Composer({
               <span className="min-w-0 truncate text-mute">
                 {c.description}
               </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!matches.length && entries.length > 0 && (
+        <ul
+          ref={menu}
+          role="listbox"
+          className="absolute right-0 bottom-full left-0 max-h-64 overflow-y-auto border-t border-line bg-panel py-1"
+        >
+          {entries.map((entry, i) => (
+            <li
+              key={entry}
+              role="option"
+              aria-selected={i === highlighted}
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={() => setSelected(i)}
+              onClick={() => complete(entry)}
+              className={`cursor-pointer truncate px-3 py-1 text-sm ${
+                i === highlighted
+                  ? 'bg-paper text-void'
+                  : entry.endsWith('/')
+                    ? 'text-folder'
+                    : 'text-file'
+              }`}
+            >
+              @{entry}
             </li>
           ))}
         </ul>
@@ -263,7 +342,8 @@ export default function Composer({
             autoFocus
             rows={1}
             value={prompt}
-            onChange={(e) => edit(e.target.value)}
+            onChange={(e) => edit(e.target.value, e.target.selectionStart)}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onScroll={(e) => {
               if (mirror.current)
                 mirror.current.scrollTop = e.currentTarget.scrollTop;
@@ -293,17 +373,18 @@ export default function Composer({
             }}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
-              if (matches.length > 0) {
+              if (options > 0) {
                 const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
                 if (step) {
                   e.preventDefault();
-                  const n = matches.length;
-                  return setSelected((highlighted + step + n) % n);
+                  return setSelected((highlighted + step + options) % options);
                 }
                 if (e.key === 'Escape') return setDismissed(true);
                 if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
                   e.preventDefault();
-                  return pick(matches[highlighted], e.key === 'Enter');
+                  return matches.length
+                    ? pick(matches[highlighted], e.key === 'Enter')
+                    : complete(entries[highlighted]);
                 }
               }
               if (e.key !== 'Enter' || e.shiftKey) return;

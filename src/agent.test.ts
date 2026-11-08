@@ -244,7 +244,7 @@ describe('agent:send', () => {
     choice: unknown = { model: 'opus' },
     images: unknown[] = [],
     resume?: string,
-    permission = 'ask',
+    permission = 'default',
   ) =>
     started.add(runId) &&
     handlers.get('agent:send')!(
@@ -431,7 +431,7 @@ describe('agent:send', () => {
     expect(sdk.query).toHaveBeenCalledTimes(2);
   });
 
-  it('starts sessions asking for permission unless auto is chosen', async () => {
+  it('starts sessions in the chosen permission mode', async () => {
     const s = sender();
     await send(s, 'p1', 'a');
     expect(sdk.query.mock.lastCall![0].options).toMatchObject({
@@ -441,7 +441,7 @@ describe('agent:send', () => {
     });
     await send(s, 'p2', 'a', { model: 'opus' }, [], undefined, 'auto');
     expect(sdk.query.mock.lastCall![0].options).toMatchObject({
-      permissionMode: 'bypassPermissions',
+      permissionMode: 'auto',
       allowDangerouslySkipPermissions: true,
     });
   });
@@ -518,12 +518,12 @@ describe('agent:send', () => {
     const set = (runId: string, permission: string) =>
       handlers.get('agent:set-permission')!({}, runId, permission);
     await set('p5', 'auto');
-    expect(q.setPermissionMode).toHaveBeenLastCalledWith('bypassPermissions');
+    expect(q.setPermissionMode).toHaveBeenLastCalledWith('auto');
     await send(s, 'p5', 'b', { model: 'opus' }, [], undefined, 'auto');
     expect(q.setPermissionMode).toHaveBeenCalledTimes(1);
-    await send(s, 'p5', 'c', { model: 'opus' }, [], undefined, 'ask');
-    expect(q.setPermissionMode).toHaveBeenLastCalledWith('default');
-    await set('p5', 'ask');
+    await send(s, 'p5', 'c', { model: 'opus' }, [], undefined, 'plan');
+    expect(q.setPermissionMode).toHaveBeenLastCalledWith('plan');
+    await set('p5', 'plan');
     expect(q.setPermissionMode).toHaveBeenCalledTimes(2);
     expect(sdk.query).toHaveBeenCalledTimes(1);
     await expect(set('none', 'auto')).resolves.toBeUndefined();
@@ -689,6 +689,7 @@ describe('idle queries', () => {
     async (channel) => {
       sdk.query.mockReturnValueOnce({
         reloadSkills: async () => ({ skills: [] }),
+        supportedCommands: async () => [],
         supportedModels: async () => [],
         usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET:
           async () => ({

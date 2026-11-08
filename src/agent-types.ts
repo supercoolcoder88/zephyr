@@ -20,7 +20,13 @@ export type AgentEvent =
   | { type: 'permission'; request: PermissionRequest }
   | { type: 'permission-end'; id: string };
 
-export type Permission = 'ask' | 'auto';
+// Claude Code permission modes the user can switch between.
+export type Permission =
+  | 'auto'
+  | 'default'
+  | 'acceptEdits'
+  | 'plan'
+  | 'bypassPermissions';
 
 export interface PermissionRequest {
   id: string;
@@ -108,6 +114,8 @@ export interface AgentApi {
     candidates: string[],
   ): Promise<Record<string, 'file' | 'folder'>>;
   catalog(cwd: string): Promise<{ commands: SlashCommand[]; models: Model[] }>;
+  // Entries of the folder in partial (relative to cwd) whose names start with its last segment; folders end in '/'.
+  complete(cwd: string, partial: string): Promise<string[]>;
   // Stops the running turn and cancels every queued message.
   interrupt(runId: string): Promise<void>;
   close(runId: string): Promise<void>;

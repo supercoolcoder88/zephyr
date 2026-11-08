@@ -47,7 +47,7 @@ export default function App() {
   const [finishedId, setFinishedId] = useState<string>();
   const [deleteError, setDeleteError] = useState<string>();
   const [permission, setPermission] = useState(
-    () => (localStorage.getItem('permission') ?? 'ask') as Permission,
+    () => (localStorage.getItem('mode') ?? 'auto') as Permission,
   );
   // Run id -> the thread whose session it drives; a draft's id changes when its session starts.
   const runs = useRef(
@@ -425,7 +425,7 @@ export default function App() {
         permission={permission}
         onPermission={(next) => {
           setPermission(next);
-          localStorage.setItem('permission', next);
+          localStorage.setItem('mode', next);
           for (const [runId, run] of runs.current) {
             window.agent.setPermission(runId, next).catch(report(run.id));
           }

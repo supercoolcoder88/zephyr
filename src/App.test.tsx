@@ -21,6 +21,9 @@ const finishRun = (runId = lastRunId()) =>
 const agent = {
   send: vi.fn(),
   pickWorkspace: vi.fn(),
+  complete: vi.fn(
+    async (_cwd: string, _partial: string): Promise<string[]> => [],
+  ),
   interrupt: vi.fn(),
   close: vi.fn(),
   usage: vi.fn(),
@@ -171,7 +174,7 @@ it('resumes the session when sending in a loaded thread', async () => {
     '/proj',
     'b',
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 });
@@ -186,7 +189,7 @@ it('starts a fresh session when sending in a draft', async () => {
     '/proj',
     undefined,
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 });
@@ -215,7 +218,7 @@ it('attaches pasted images and sends them with the prompt', async () => {
     '/proj',
     undefined,
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
   expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
@@ -234,7 +237,7 @@ it('sends on Enter and inserts a newline on Shift+Enter', async () => {
     '/proj',
     undefined,
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 });
@@ -264,7 +267,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
     '/proj',
     undefined,
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 
@@ -294,7 +297,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
     '/proj',
     'sid',
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 });
@@ -326,7 +329,7 @@ it('runs threads concurrently and routes events by run', async () => {
     '/proj',
     'a',
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 
@@ -526,7 +529,7 @@ it('runs a slash command picked from the menu', async () => {
     '/proj',
     undefined,
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 });
@@ -558,7 +561,7 @@ it('sends with the model and effort picked from the composer', async () => {
     '/proj',
     undefined,
     { model: 'sonnet', effort: 'high' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 
@@ -574,7 +577,7 @@ it('sends with the model and effort picked from the composer', async () => {
     '/proj',
     undefined,
     { model: 'sonnet' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 });
@@ -670,7 +673,7 @@ it("lists a turn's subthreads and opens one in a popup", async () => {
   expect(within(sub).getByLabelText('done')).toBeInTheDocument();
 });
 
-it('colours valid slash commands and existing paths in the composer', async () => {
+it('colours valid slash commands and existing @ paths in the composer', async () => {
   agent.paths.mockImplementation(async (_cwd: string, candidates: string[]) =>
     Object.fromEntries(
       candidates.flatMap((c) =>
@@ -684,7 +687,10 @@ it('colours valid slash commands and existing paths in the composer', async () =
   );
   const user = await open();
   const box = screen.getByPlaceholderText('Ask the agent…');
-  await user.type(box, '/review @src/App.tsx src/ missing.ts{Escape}');
+  await user.type(
+    box,
+    '/review @src/App.tsx @src/ src/App.tsx @missing.ts{Escape}',
+  );
   const mirror = box.previousElementSibling!;
   expect(
     await within(mirror as HTMLElement).findByText('@src/App.tsx'),
@@ -692,7 +698,7 @@ it('colours valid slash commands and existing paths in the composer', async () =
   expect(within(mirror as HTMLElement).getByText('/review')).toHaveClass(
     'text-command',
   );
-  expect(within(mirror as HTMLElement).getByText('src/')).toHaveClass(
+  expect(within(mirror as HTMLElement).getByText('@src/')).toHaveClass(
     'text-folder',
   );
   expect(agent.paths).toHaveBeenLastCalledWith('/proj', [
@@ -700,13 +706,32 @@ it('colours valid slash commands and existing paths in the composer', async () =
     'src/',
     'missing.ts',
   ]);
-  expect(within(mirror as HTMLElement).getByText('missing.ts')).not.toHaveClass(
-    'text-file',
-  );
+  expect(mirror.querySelectorAll('.text-file')).toHaveLength(1);
 
   await user.clear(box);
   await user.type(box, '/nope');
   expect(mirror.querySelector('.text-command')).toBeNull();
+});
+
+it('tab completes @ paths, keeping folders open and spacing after files', async () => {
+  agent.complete.mockImplementation(
+    async (_cwd: string, partial: string) =>
+      ({
+        'src/c': ['src/components/'],
+        'src/components/': ['src/components/chat/', 'src/components/Item.tsx'],
+      })[partial] ?? [],
+  );
+  const user = await open();
+  const box = screen.getByPlaceholderText('Ask the agent…');
+  await user.type(box, 'see @src/c');
+  expect(await screen.findByRole('option', { name: '@src/components/' }));
+  await user.keyboard('{Tab}');
+  expect(box).toHaveValue('see @src/components/');
+  await screen.findByRole('option', { name: '@src/components/Item.tsx' });
+  await user.keyboard('{ArrowDown}{Tab}');
+  expect(box).toHaveValue('see @src/components/Item.tsx ');
+  expect(screen.queryByRole('option')).toBeNull();
+  expect(agent.complete).toHaveBeenCalledWith('/proj', 'src/c');
 });
 
 async function running() {
@@ -917,7 +942,7 @@ it('queues a message sent while the agent is running into the same run', async (
     '/proj',
     undefined,
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
   expect(screen.getByText('RUNNING')).toBeInTheDocument();
@@ -981,7 +1006,7 @@ it('stops the turn without ending the session', async () => {
     '/proj',
     'b',
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
   expect(agent.close).not.toHaveBeenCalled();
@@ -1035,53 +1060,34 @@ it("closes the left project's idle sessions and resumes them on return", async (
     '/proj',
     'b',
     { model: 'opus' },
-    'ask',
+    'auto',
     expect.any(String),
   );
 });
 
-it('asks for permission by default and switches to auto from settings', async () => {
+it('defaults to auto mode and switches mode from the sidebar', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
   await sendPrompt(user, 'go');
   const runId = lastRunId();
-  expect(agent.send).toHaveBeenLastCalledWith(
-    runId,
-    'go',
-    [],
-    '/proj',
-    'b',
-    { model: 'opus' },
-    'ask',
-    expect.any(String),
-  );
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
-  const settings = screen.getByRole('dialog', { name: 'Settings' });
-  const ask = within(settings).getByRole('button', { name: '[ ASK ]' });
-  const auto = within(settings).getByRole('button', { name: '[ AUTO ]' });
-  expect(ask).toHaveAttribute('aria-pressed', 'true');
-  expect(auto).toHaveAttribute('aria-pressed', 'false');
-  await user.click(auto);
-  expect(auto).toHaveAttribute('aria-pressed', 'true');
-  expect(ask).toHaveAttribute('aria-pressed', 'false');
-  expect(localStorage.getItem('permission')).toBe('auto');
-  expect(agent.setPermission).toHaveBeenCalledWith(runId, 'auto');
+  expect(agent.send.mock.lastCall![6]).toBe('auto');
+  await user.click(screen.getByRole('button', { name: '[ Auto ]' }));
+  const menu = screen.getByRole('menu', { name: 'Permission mode' });
+  expect(
+    within(menu).getByRole('menuitemradio', { name: 'Auto' }),
+  ).toHaveAttribute('aria-checked', 'true');
+  await user.click(within(menu).getByRole('menuitemradio', { name: 'Plan' }));
+  expect(screen.queryByRole('menu', { name: 'Permission mode' })).toBeNull();
+  expect(screen.getByRole('button', { name: '[ Plan ]' })).toBeInTheDocument();
+  expect(localStorage.getItem('mode')).toBe('plan');
+  expect(agent.setPermission).toHaveBeenCalledWith(runId, 'plan');
   await sendPrompt(user, 'more');
-  expect(agent.send).toHaveBeenLastCalledWith(
-    runId,
-    'more',
-    [],
-    '/proj',
-    'b',
-    { model: 'opus' },
-    'auto',
-    expect.any(String),
-  );
+  expect(agent.send.mock.lastCall![6]).toBe('plan');
 
   cleanup();
   const again = await open();
   await sendPrompt(again, 'later');
-  expect(agent.send.mock.lastCall![6]).toBe('auto');
+  expect(agent.send.mock.lastCall![6]).toBe('plan');
 });
 
 const permissionCards = () =>
@@ -1184,11 +1190,12 @@ it('marks a thread as waiting while a tool call needs permission', async () => {
   expect(screen.getByText('RUNNING')).toBeInTheDocument();
 });
 
-it('opens settings and usage one at a time and closes them on Escape or outside click', async () => {
+it('opens the mode menu and usage one at a time and closes them on Escape or outside click', async () => {
   agent.usage.mockResolvedValue(null);
   const user = await open();
-  const button = screen.getByRole('button', { name: 'Settings' });
-  const settings = () => screen.queryByRole('dialog', { name: 'Settings' });
+  const button = screen.getByRole('button', { name: '[ Auto ]' });
+  const settings = () =>
+    screen.queryByRole('menu', { name: 'Permission mode' });
   const usage = () => screen.queryByRole('dialog', { name: 'Usage' });
 
   expect(button).toHaveAttribute('aria-expanded', 'false');
