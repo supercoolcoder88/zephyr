@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -12,6 +13,7 @@ import type {
   ModelChoice,
   SlashCommand,
 } from '../../agent-types';
+import Button from '../ui/Button';
 import ModelPicker from './ModelPicker';
 
 // Listing commands and models spawns a CLI, so do it once per workspace.
@@ -94,6 +96,7 @@ export default function Composer({
   const nextCaret = useRef<number>(undefined);
   const menu = useRef<HTMLUListElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   const segments = parse(prompt, commands).map((s) =>
     s.path ? { ...s, kind: paths[s.path] } : s,
@@ -124,7 +127,7 @@ export default function Composer({
     partial !== undefined && completions?.partial === partial
       ? completions.entries.filter((e) => e !== partial)
       : [];
-  const options = matches.length ? matches.length : entries.length;
+  const options = matches.length || entries.length;
   const highlighted = Math.min(selected, options - 1);
 
   useEffect(() => {
@@ -233,62 +236,52 @@ export default function Composer({
       }}
       className={`relative flex shrink-0 items-end gap-2 border-t border-line bg-panel p-3 ${running && !waiting ? 'scanline' : ''}`}
     >
-      {matches.length > 0 && (
+      {options > 0 && (
         <ul
           ref={menu}
+          id={listId}
           role="listbox"
-          className="absolute right-0 bottom-full left-0 max-h-64 overflow-y-auto border-t border-line bg-panel py-1"
+          className="absolute inset-x-0 bottom-full max-h-64 overflow-y-auto border-t border-line bg-panel py-1"
         >
-          {matches.map((c, i) => (
-            <li
-              key={c.name}
-              role="option"
-              aria-selected={i === highlighted}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setSelected(i)}
-              onClick={() => pick(c, true)}
-              className={`flex cursor-pointer gap-3 px-3 py-1 text-sm ${
-                i === highlighted ? 'bg-paper text-void' : ''
-              }`}
-            >
-              <span className="shrink-0">
-                /{c.name}
-                {c.argumentHint && (
-                  <span className="text-mute"> {c.argumentHint}</span>
-                )}
-              </span>
-              <span className="min-w-0 truncate text-mute">
-                {c.description}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {!matches.length && entries.length > 0 && (
-        <ul
-          ref={menu}
-          role="listbox"
-          className="absolute right-0 bottom-full left-0 max-h-64 overflow-y-auto border-t border-line bg-panel py-1"
-        >
-          {entries.map((entry, i) => (
-            <li
-              key={entry}
-              role="option"
-              aria-selected={i === highlighted}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setSelected(i)}
-              onClick={() => complete(entry)}
-              className={`cursor-pointer truncate px-3 py-1 text-sm ${
-                i === highlighted
-                  ? 'bg-paper text-void'
-                  : entry.endsWith('/')
-                    ? 'text-folder'
-                    : 'text-file'
-              }`}
-            >
-              @{entry}
-            </li>
-          ))}
+          {matches.length
+            ? matches.map((c, i) => (
+                <li
+                  key={c.name}
+                  id={`${listId}-${i}`}
+                  role="option"
+                  aria-selected={i === highlighted}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setSelected(i)}
+                  onClick={() => pick(c, true)}
+                  className="flex cursor-pointer gap-3 px-3 py-1 text-sm aria-selected:bg-paper aria-selected:text-void"
+                >
+                  <span className="shrink-0">
+                    /{c.name}
+                    {c.argumentHint && (
+                      <span className="text-mute"> {c.argumentHint}</span>
+                    )}
+                  </span>
+                  <span className="min-w-0 truncate text-mute">
+                    {c.description}
+                  </span>
+                </li>
+              ))
+            : entries.map((entry, i) => (
+                <li
+                  key={entry}
+                  id={`${listId}-${i}`}
+                  role="option"
+                  aria-selected={i === highlighted}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setSelected(i)}
+                  onClick={() => complete(entry)}
+                  className={`cursor-pointer truncate px-3 py-1 text-sm aria-selected:bg-paper aria-selected:text-void ${
+                    entry.endsWith('/') ? 'text-folder' : 'text-file'
+                  }`}
+                >
+                  @{entry}
+                </li>
+              ))}
         </ul>
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -324,7 +317,7 @@ export default function Composer({
           <div
             ref={mirror}
             aria-hidden
-            className="absolute inset-0 overflow-hidden border border-transparent px-3 py-2 text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
+            className="absolute inset-0 overflow-hidden border border-transparent px-3 py-2.25 text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
           >
             {segments.map((s, i) =>
               s.kind ? (
@@ -341,6 +334,13 @@ export default function Composer({
             ref={composer}
             autoFocus
             rows={1}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={options > 0}
+            aria-controls={options > 0 ? listId : undefined}
+            aria-activedescendant={
+              options > 0 ? `${listId}-${highlighted}` : undefined
+            }
             value={prompt}
             onChange={(e) => edit(e.target.value, e.target.selectionStart)}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
@@ -392,27 +392,25 @@ export default function Composer({
               send(prompt);
             }}
             placeholder="Ask the agent…"
-            className="relative block max-h-48 w-full resize-none border border-line bg-transparent px-3 py-2 text-sm text-transparent caret-ink [field-sizing:content] [scrollbar-gutter:stable] outline-none placeholder:text-mute focus:border-line-strong"
+            className="relative block max-h-48 w-full resize-none border border-line bg-transparent px-3 py-2.25 text-sm text-transparent caret-ink [field-sizing:content] [scrollbar-gutter:stable] outline-none placeholder:text-mute focus:border-line-strong"
           />
         </div>
       </div>
       <ModelPicker models={models} choice={choice} onChoose={choose} />
       {running && (
-        <button
-          type="button"
-          onClick={onCancel}
-          className="h-[38px] border border-alert px-4 text-2xs tracking-widest text-alert transition-colors duration-150 ease-mech hover:bg-alert hover:text-void"
-        >
+        <Button variant="outline-destructive" size="lg" onClick={onCancel}>
           [ STOP ]
-        </button>
+        </Button>
       )}
-      <button
+      <Button
         type="submit"
+        variant="primary"
+        size="lg"
         disabled={!prompt.trim() && !images.length}
-        className="chamfer h-[38px] bg-paper px-4 text-2xs font-medium tracking-widest text-void transition-colors duration-150 ease-mech hover:bg-ink disabled:bg-line-strong disabled:text-mute"
+        className="chamfer font-medium"
       >
         [ SEND ]
-      </button>
+      </Button>
     </form>
   );
 }

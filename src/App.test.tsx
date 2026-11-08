@@ -540,17 +540,26 @@ it('sends with the model and effort picked from the composer', async () => {
   await user.click(picker);
   expect(
     ['Opus 5.5', 'Sonnet 5.5'].map(
-      (name) => screen.getByRole('menuitem', { name }).textContent,
+      (name) => screen.getByRole('menuitemradio', { name }).textContent,
     ),
   ).toEqual(['>Opus 5.5high', 'Sonnet 5.5low']);
-  await user.hover(screen.getByRole('menuitem', { name: 'Sonnet 5.5' }));
+  await user.hover(screen.getByRole('menuitemradio', { name: 'Sonnet 5.5' }));
   const efforts = screen.getByRole('menu', { name: 'Sonnet 5.5 effort' });
   expect(
     within(efforts)
-      .getAllByRole('menuitem')
+      .getAllByRole('menuitemradio')
       .map((b) => b.textContent),
   ).toEqual(['>lowdefault', 'high']);
-  await user.click(within(efforts).getByRole('menuitem', { name: 'high' }));
+  const high = within(efforts).getByRole('menuitemradio', { name: 'high' });
+  await user.hover(high);
+  expect(high).toHaveFocus();
+  expect(
+    screen.getByRole('menuitemradio', { name: 'Sonnet 5.5' }),
+  ).toHaveAttribute('data-highlighted');
+  expect(
+    screen.getByRole('menuitemradio', { name: 'Opus 5.5' }),
+  ).not.toHaveAttribute('data-highlighted');
+  await user.click(high);
   expect(screen.queryByRole('menu')).toBeNull();
   expect(picker).toHaveTextContent('Sonnet 5.5 · high');
   await sendPrompt(user, 'go');
@@ -567,7 +576,7 @@ it('sends with the model and effort picked from the composer', async () => {
 
   await act(async () => finishRun());
   await user.click(picker);
-  await user.click(screen.getByRole('menuitem', { name: 'Sonnet 5.5' }));
+  await user.click(screen.getByRole('menuitemradio', { name: 'Sonnet 5.5' }));
   expect(picker).toHaveTextContent('Sonnet 5.5 · low');
   await sendPrompt(user, 'again');
   expect(agent.send).toHaveBeenLastCalledWith(
@@ -607,10 +616,14 @@ it('picks a model and effort from the keyboard', async () => {
   const picker = screen.getByRole('button', { name: 'Opus 5.5 · high' });
   picker.focus();
   await user.keyboard('{Enter}{ArrowDown}{ArrowDown}');
-  expect(screen.getByRole('menuitem', { name: 'Sonnet 5.5' })).toHaveFocus();
+  expect(
+    screen.getByRole('menuitemradio', { name: 'Sonnet 5.5' }),
+  ).toHaveFocus();
   await user.keyboard('{ArrowLeft}{ArrowDown}');
   const efforts = screen.getByRole('menu', { name: 'Sonnet 5.5 effort' });
-  expect(within(efforts).getByRole('menuitem', { name: 'high' })).toHaveFocus();
+  expect(
+    within(efforts).getByRole('menuitemradio', { name: 'high' }),
+  ).toHaveFocus();
   await user.keyboard('{Enter}');
   expect(picker).toHaveTextContent('Sonnet 5.5 · high');
   expect(picker).toHaveFocus();
@@ -623,8 +636,17 @@ it('picks a model and effort from the keyboard', async () => {
 it('completes slash commands that take arguments', async () => {
   const user = await open();
   const box = screen.getByPlaceholderText('Ask the agent…');
-  await user.type(box, '/{ArrowDown}{Enter}');
+  await user.type(box, '/{ArrowDown}');
+  const listbox = screen.getByRole('listbox');
+  expect(box).toHaveAttribute('aria-expanded', 'true');
+  expect(box).toHaveAttribute('aria-controls', listbox.id);
+  expect(box).toHaveAttribute(
+    'aria-activedescendant',
+    screen.getByRole('option', { selected: true, name: /review/ }).id,
+  );
+  await user.keyboard('{Enter}');
   expect(box).toHaveValue('/review ');
+  expect(box).toHaveAttribute('aria-expanded', 'false');
   expect(screen.queryByRole('listbox')).toBeNull();
   expect(agent.send).not.toHaveBeenCalled();
 
@@ -664,12 +686,17 @@ it("lists a turn's subthreads and opens one in a popup", async () => {
   const popup = screen.getByRole('dialog', { name: 'count files' });
   expect(within(popup).getByText('counting now')).toBeInTheDocument();
   expect(within(popup).getByText('RUNNING')).toBeInTheDocument();
+  const close = within(popup).getByRole('button', { name: '[ CLOSE ]' });
+  expect(close).toHaveFocus();
+  await user.tab();
+  expect(close).toHaveFocus();
 
   act(() => emit({ type: 'subthread-end', id: 't1', ok: true }));
   expect(within(popup).getByText('DONE')).toBeInTheDocument();
 
   await user.keyboard('{Escape}');
   expect(screen.queryByRole('dialog')).toBeNull();
+  expect(sub).toHaveFocus();
   expect(within(sub).getByLabelText('done')).toBeInTheDocument();
 });
 
@@ -1220,6 +1247,29 @@ it('opens the mode menu and usage one at a time and closes them on Escape or out
   await user.click(button);
   expect(usage()).toBeNull();
   expect(settings()).toBeInTheDocument();
+});
+
+it('moves through the mode menu from the keyboard', async () => {
+  const user = await open();
+  const button = screen.getByRole('button', { name: '[ Auto ]' });
+  await user.click(button);
+  const item = (name: string) => screen.getByRole('menuitemradio', { name });
+  expect(item('Auto')).toHaveFocus();
+  await user.keyboard('{ArrowUp}');
+  expect(item('Bypass')).toHaveFocus();
+  await user.keyboard('{ArrowDown}{ArrowDown}');
+  expect(item('Ask')).toHaveFocus();
+  await user.hover(item('Plan'));
+  expect(item('Plan')).toHaveFocus();
+  expect(item('Ask')).not.toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(button).toHaveFocus();
+
+  await user.click(button);
+  item('Bypass').focus();
+  await user.tab();
+  expect(screen.queryByRole('menu')).toBeNull();
 });
 
 it('keeps a pending permission when another thread finishes', async () => {

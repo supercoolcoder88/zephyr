@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Permission, UsageWindow } from '../../agent-types';
 import { stateDot, threadState, type Thread } from '../../thread';
+import Button from '../ui/Button';
+import MenuItem from '../ui/MenuItem';
+import useDismiss from '../ui/useDismiss';
 
 interface Props {
   workspace: string;
@@ -55,28 +58,21 @@ export default function Sidebar({
   >('closed');
   const [modeOpen, setModeOpen] = useState(false);
   const footer = useRef<HTMLElement>(null);
+  const modeMenu = useRef<HTMLUListElement>(null);
+  const modeTrigger = useRef<HTMLButtonElement>(null);
   const usageOpen = usage !== 'closed';
-  const popupOpen = usageOpen || modeOpen;
+
+  useDismiss(footer, usageOpen || modeOpen, () => {
+    setUsage('closed');
+    setModeOpen(false);
+  });
 
   useEffect(() => {
-    if (!popupOpen) return;
-    const close = (e: Event) => {
-      if (
-        e instanceof KeyboardEvent
-          ? e.key === 'Escape'
-          : !footer.current?.contains(e.target as Node)
-      ) {
-        setUsage('closed');
-        setModeOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', close);
-    document.addEventListener('keydown', close);
-    return () => {
-      document.removeEventListener('pointerdown', close);
-      document.removeEventListener('keydown', close);
-    };
-  }, [popupOpen]);
+    if (modeOpen)
+      modeMenu.current
+        ?.querySelector<HTMLElement>('[aria-checked=true]')
+        ?.focus();
+  }, [modeOpen]);
 
   function toggleUsage() {
     setModeOpen(false);
@@ -112,6 +108,8 @@ export default function Sidebar({
         }`}
       >
         <button
+          type="button"
+          aria-current={active ? 'page' : undefined}
           onClick={() => onSelect(thread.id)}
           className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-4 text-left text-sm"
         >
@@ -156,12 +154,7 @@ export default function Sidebar({
             <span className="text-2xs tracking-widest text-mute">DEV</span>
           )}
         </span>
-        <button
-          onClick={onNew}
-          className="text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech hover:text-ink"
-        >
-          [ + NEW ]
-        </button>
+        <Button onClick={onNew}>[ + NEW ]</Button>
       </header>
       <button
         type="button"
@@ -177,16 +170,16 @@ export default function Sidebar({
         {current.map(row)}
         {archived.length > 0 && (
           <>
-            <button
-              type="button"
+            <Button
+              size="md"
               aria-expanded={showArchived}
               onClick={() => setShowArchived(!showArchived)}
-              className="mt-2 flex h-8 w-full items-center px-4 text-2xs tracking-widest text-mute uppercase transition-colors duration-150 ease-mech hover:bg-line hover:text-ink"
+              className="mt-2 flex w-full items-center px-4 hover:bg-line"
             >
               {showArchived
                 ? '[ HIDE ARCHIVED ]'
                 : `[ ARCHIVED ${archived.length} ]`}
-            </button>
+            </Button>
             {showArchived && archived.map(row)}
           </>
         )}
@@ -196,7 +189,7 @@ export default function Sidebar({
         ref={footer}
         className="relative flex h-10 items-center gap-3 border-t border-line px-4"
       >
-        {usage !== 'closed' && (
+        {usageOpen && (
           <div
             role="dialog"
             aria-label="Usage"
@@ -238,38 +231,46 @@ export default function Sidebar({
         )}
         {modeOpen && (
           <ul
+            ref={modeMenu}
             role="menu"
             aria-label="Permission mode"
-            className="absolute inset-x-0 bottom-full border-t border-line bg-panel py-1 text-2xs tracking-widest uppercase"
+            onBlur={(e) => {
+              const to = e.relatedTarget;
+              if (!e.currentTarget.contains(to) && to !== modeTrigger.current)
+                setModeOpen(false);
+            }}
+            onKeyDown={(e) => {
+              const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+              if (e.key === 'Escape') modeTrigger.current?.focus();
+              if (!step) return;
+              e.preventDefault();
+              const items = [
+                ...e.currentTarget.querySelectorAll<HTMLElement>('button'),
+              ];
+              const at = items.indexOf(e.target as HTMLElement);
+              items[(at + step + items.length) % items.length].focus();
+            }}
+            className="absolute inset-x-0 bottom-full border-t border-line bg-panel py-1"
           >
             {modes.map(([value, label]) => (
               <li key={value}>
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={permission === value}
+                <MenuItem
+                  checked={permission === value}
                   onClick={() => {
                     onPermission(value);
                     setModeOpen(false);
+                    modeTrigger.current?.focus();
                   }}
-                  className={`flex w-full gap-2 px-4 py-1 text-left transition-colors duration-150 ease-mech hover:bg-paper hover:text-void ${
-                    permission === value ? 'text-ink' : 'text-mute'
-                  }`}
                 >
-                  <span aria-hidden className="w-2">
-                    {permission === value && '>'}
-                  </span>
                   {label}
-                </button>
+                </MenuItem>
               </li>
             ))}
           </ul>
         )}
-        <button
-          type="button"
+        <Button
           onClick={toggleTheme}
           aria-label={`${nextTheme[theme ?? 'dark']} mode`}
-          className="text-mute transition-colors duration-150 ease-mech hover:text-ink"
         >
           <svg
             viewBox="0 0 16 16"
@@ -290,13 +291,11 @@ export default function Sidebar({
               </>
             )}
           </svg>
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
           onClick={toggleUsage}
           aria-label="Usage"
           aria-expanded={usageOpen}
-          className={`transition-colors duration-150 ease-mech hover:text-ink ${!usageOpen ? 'text-mute' : 'text-ink'}`}
         >
           <svg
             viewBox="0 0 16 16"
@@ -308,19 +307,19 @@ export default function Sidebar({
           >
             <path d="M2 14h12M4 11v-3M8 11V3M12 11V6" />
           </svg>
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          ref={modeTrigger}
           onClick={() => {
             setUsage('closed');
             setModeOpen(!modeOpen);
           }}
           aria-haspopup="menu"
           aria-expanded={modeOpen}
-          className={`ml-auto text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech hover:text-ink ${!modeOpen ? 'text-mute' : 'text-ink'}`}
+          className="ml-auto"
         >
           [ {modes.find(([m]) => m === permission)?.[1] ?? permission} ]
-        </button>
+        </Button>
       </footer>
     </aside>
   );

@@ -198,7 +198,7 @@ it('ignores selections outside the transcript', async () => {
   select(screen.getByRole('heading', { name: 'Thread' }));
   expect(copyButton()).toBeNull();
 
-  const box = screen.getByRole<HTMLTextAreaElement>('textbox');
+  const box = screen.getByRole<HTMLTextAreaElement>('combobox');
   await userEvent.type(box, 'draft text');
   box.setSelectionRange(0, 5);
   fireEvent.mouseUp(box);
@@ -209,7 +209,7 @@ it('quotes the selection into an empty composer and focuses it', async () => {
   const { onPrompt, composer } = renderQuote();
   select(screen.getByText(/first ask/));
   await userEvent.click(copyButton()!);
-  const box = screen.getByRole<HTMLTextAreaElement>('textbox');
+  const box = screen.getByRole<HTMLTextAreaElement>('combobox');
   expect(box).toHaveValue('> first ask\n>\n> second ask\n\n');
   expect(onPrompt).toHaveBeenLastCalledWith('> first ask\n>\n> second ask\n\n');
   expect(composer.current).toHaveFocus();
@@ -222,7 +222,7 @@ it('appends the quote after an existing draft', async () => {
   const { onPrompt } = renderQuote('look at this  \n');
   select(screen.getByText('first line'));
   await userEvent.click(copyButton()!);
-  expect(screen.getByRole('textbox')).toHaveValue(
+  expect(screen.getByRole('combobox')).toHaveValue(
     'look at this\n\n> first line\n\n',
   );
   expect(onPrompt).toHaveBeenLastCalledWith('look at this\n\n> first line\n\n');
@@ -269,9 +269,9 @@ it('offers stop and queueing while running', async () => {
   expect(send).toBeDisabled();
   expect(send).toHaveClass('chamfer');
   expect(stop).not.toHaveClass('chamfer');
-  await userEvent.type(screen.getByRole('textbox'), 'more info{Enter}');
+  await userEvent.type(screen.getByRole('combobox'), 'more info{Enter}');
   expect(onSend).toHaveBeenCalledWith('more info', [], { model: 'opus' });
-  await userEvent.type(screen.getByRole('textbox'), 'again');
+  await userEvent.type(screen.getByRole('combobox'), 'again');
   await userEvent.click(send);
   expect(onSend).toHaveBeenLastCalledWith('again', [], { model: 'opus' });
   await userEvent.click(stop);

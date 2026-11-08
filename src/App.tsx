@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ChatThread from './components/chat/ChatThread';
 import Sidebar from './components/sidebar/Sidebar';
+import Button from './components/ui/Button';
 import type { Image, ModelChoice, Permission, ThreadItem } from './agent-types';
 import { newThread, sortThreads, type Thread } from './thread';
 
@@ -399,13 +400,14 @@ export default function App() {
             <span className="text-2xs tracking-widest text-mute">DEV</span>
           )}
         </div>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="lg"
           onClick={openWorkspace}
-          className="chamfer bg-paper px-6 py-3 text-2xs tracking-widest text-void transition-opacity duration-150 ease-mech hover:opacity-80"
+          className="chamfer px-6"
         >
           [ OPEN PROJECT ]
-        </button>
+        </Button>
       </main>
     );
   }

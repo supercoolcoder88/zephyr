@@ -12,6 +12,9 @@ import { stateDot, type Thread } from '../../thread';
 import Composer from '../composer/Composer';
 import Item, { summarize } from './Item';
 import SubthreadDialog from './SubthreadDialog';
+import Button from '../ui/Button';
+
+const quoteWidth = 144;
 
 interface Props {
   thread: Thread;
@@ -129,7 +132,7 @@ export default function ChatThread({
             NO MESSAGES YET
           </p>
         ) : (
-          <div className="mx-auto max-w-[58rem] space-y-6">
+          <div className="mx-auto max-w-4xl space-y-6">
             {turns.map((turn, t) => {
               const last = t === turns.length - 1;
               const collapsed = !(running && last);
@@ -165,26 +168,22 @@ export default function ChatThread({
                   {(hidden > 0 || subs.length > 0) && (
                     <div className="flex justify-end gap-4">
                       {subs.length > 0 && (
-                        <button
-                          type="button"
+                        <Button
                           aria-expanded={listing}
                           onClick={() => setListed(toggle(listed, t))}
-                          className="text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech hover:text-ink"
                         >
                           {listing
                             ? '[ HIDE SUBTHREADS ]'
                             : `[ SUBTHREADS ${subs.length} ]`}
-                        </button>
+                        </Button>
                       )}
                       {hidden > 0 && (
-                        <button
-                          type="button"
+                        <Button
                           aria-expanded={open}
                           onClick={() => setExpanded(toggle(expanded, t))}
-                          className="text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech hover:text-ink"
                         >
                           {open ? '[ HIDE THINKING ]' : '[ SHOW THINKING ]'}
-                        </button>
+                        </Button>
                       )}
                     </div>
                   )}
@@ -231,20 +230,20 @@ export default function ChatThread({
                   </p>
                 </div>
                 <div className="flex shrink-0 gap-2">
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="md"
                     onClick={() => onAnswer(request.id, true)}
-                    className="h-7 bg-paper px-3 text-2xs tracking-widest text-void transition-colors duration-150 ease-mech hover:bg-ink"
                   >
                     [ ALLOW ]
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="md"
                     onClick={() => onAnswer(request.id, false)}
-                    className="h-7 px-3 text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech hover:text-alert"
                   >
                     [ DENY ]
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
@@ -253,21 +252,22 @@ export default function ChatThread({
       </div>
 
       {quote && (
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => quoteToChat(quote.text)}
           style={{
             top: Math.max(4, quote.rect.top - 28),
             left: Math.min(
-              Math.max(4, quote.rect.right - 140),
-              window.innerWidth - 144,
+              Math.max(4, quote.rect.right - quoteWidth),
+              window.innerWidth - quoteWidth - 4,
             ),
           }}
-          className="fixed z-10 h-6 w-[140px] bg-paper text-2xs tracking-widest text-void transition-colors duration-150 ease-mech hover:bg-ink"
+          className="fixed z-10 w-36"
         >
           [ COPY TO CHAT ]
-        </button>
+        </Button>
       )}
 
       {viewed && (

@@ -50,6 +50,24 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 - Dense spacing on a 4px base. This is a tool, not a landing page.
 - A chamfered corner (`.chamfer`) is allowed on at most one primary element per view.
 
+## Component architecture
+
+Follows the shadcn/ui approach without the library: the app owns a small set of primitives in `src/components/ui/`, styled with Tailwind and driven by state, not by props that mirror state.
+
+- **Own the primitive, keep it thin.** A primitive is a plain element wrapper that forwards every native prop and `ref`. Add one only when the same markup and classes repeat in three or more places; otherwise write the element inline.
+- **Variants are maps, not branches.** Looks and sizes live in small `variants` / `sizes` objects joined into the class string. Add a key to the map rather than a new prop or a one-off class string. Callers may append `className` for layout (`ml-auto`, `w-full`, `chamfer`), not to restyle a variant.
+- **Style from state attributes.** Put state on the element (`aria-expanded`, `aria-selected`, `aria-checked`, `aria-current`, `data-highlighted`) and style it with Tailwind variants (`aria-expanded:text-ink`, `not-aria-checked:text-mute`, `group-focus:text-void`). A ternary that picks classes from the same boolean the ARIA attribute already holds is a smell.
+- **Accessibility is part of the component.** Use the correct role (`menu`/`menuitemradio`, `listbox`/`option`, `combobox`, `dialog`), arrow keys cycle items, Escape closes and returns focus to the trigger, dialogs take focus on open, trap Tab and restore focus on close. Every button sets `type`; icon-only buttons have `aria-label`.
+- **One way to dismiss.** Overlays close through `useDismiss` (outside pointerdown and Escape), plus an `onBlur` check when tabbing out should close them.
+- **Tokens only.** Colours, sizes and easing come from `src/index.css` tokens and the Tailwind scale. No hex values, no Tailwind palette colours, no arbitrary values (`h-[38px]`) when a scale step exists.
+
+### Primitives
+
+- **Button** (`ui/Button.tsx`) for every bracketed control. Variants: `ghost` (default, mute → ink, ink while `aria-expanded`), `primary` (inverted paper block), `destructive` (mute → alert), `outline-destructive` (alert outline, fills on hover). Sizes: `inline` (default, no box), `sm` h-6, `md` h-8, `lg` h-10, which matches the composer textarea.
+- **MenuItem** (`ui/MenuItem.tsx`) for menu rows: a `menuitemradio` with the `>` checked marker. Focus follows the pointer and the row inverts from `focus:` only, so exactly one row is highlighted.
+- **useDismiss** (`ui/useDismiss.ts`): `useDismiss(ref, open, onClose)`.
+- **Popover surface** (menus, listboxes, usage): `bg-panel`, `border-line` hairline, `py-1`; drop the edge that sits on an existing hairline (`border-b-0` above the composer or footer, only `border-t` when spanning the full width). Items are `px-3 py-1 text-sm`, highlighted by inversion (`bg-paper text-void`), checked `text-ink`, the rest `text-mute`.
+
 ## Key moments (the only places cyan appears)
 
 | Moment           | Treatment                                                                |
