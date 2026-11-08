@@ -1,6 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { createRef } from 'react';
 import { readFileSync } from 'node:fs';
-import { beforeEach, expect, it } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import type { ThreadItem } from '../agent-types';
 import ChatThread from './ChatThread';
 
@@ -12,6 +14,8 @@ const rule = (selector: string) => {
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = () => undefined;
+  Range.prototype.getBoundingClientRect = () => new DOMRect(100, 200, 50, 16);
+  document.getSelection()?.removeAllRanges();
   window.agent = {
     catalog: async () => ({ commands: [], models: [] }),
   } as unknown as typeof window.agent;
@@ -114,4 +118,108 @@ it('gives only the streaming text a cyan rule', () => {
   expect(screen.getByText('new').closest('.markdown')).toHaveClass(
     'border-cyan',
   );
+});
+
+const renderQuote = (prompt = '') => {
+  const onPrompt = vi.fn();
+  const composer = createRef<HTMLTextAreaElement>();
+  render(
+    <ChatThread
+      thread={{
+        id: 't1',
+        title: 'Thread',
+        cwd: '/proj',
+        updatedAt: 0,
+        prompt,
+        items: [
+          { type: 'user', text: 'first ask\n\nsecond ask' },
+          { type: 'text', text: 'first line' },
+        ],
+      }}
+      running={false}
+      justFinished={false}
+      onSend={() => undefined}
+      onCancel={() => undefined}
+      onPrompt={onPrompt}
+      composer={composer}
+    />,
+  );
+  return { onPrompt, composer };
+};
+
+const select = (from: Node, to = from) => {
+  document.getSelection()!.setBaseAndExtent(from, 0, to, to.childNodes.length);
+  fireEvent.mouseUp(from);
+};
+
+const copyButton = () =>
+  screen.queryByRole('button', { name: '[ COPY TO CHAT ]' });
+
+it('offers to copy a transcript selection to chat', () => {
+  renderQuote();
+  select(screen.getByText('first line'));
+  expect(copyButton()).toBeInTheDocument();
+});
+
+it('ignores collapsed and whitespace-only selections', () => {
+  renderQuote();
+  const line = screen.getByText('first line');
+  document.getSelection()!.collapse(line.firstChild!, 2);
+  fireEvent.mouseUp(line);
+  expect(copyButton()).toBeNull();
+
+  const blank = document.createTextNode('   ');
+  line.append(blank);
+  document.getSelection()!.setBaseAndExtent(blank, 0, blank, 3);
+  fireEvent.mouseUp(line);
+  expect(copyButton()).toBeNull();
+});
+
+it('ignores selections outside the transcript', async () => {
+  renderQuote();
+  select(screen.getByRole('heading', { name: 'Thread' }));
+  expect(copyButton()).toBeNull();
+
+  const box = screen.getByRole<HTMLTextAreaElement>('textbox');
+  await userEvent.type(box, 'draft text');
+  box.setSelectionRange(0, 5);
+  fireEvent.mouseUp(box);
+  expect(copyButton()).toBeNull();
+});
+
+it('quotes the selection into an empty composer and focuses it', async () => {
+  const { onPrompt, composer } = renderQuote();
+  select(screen.getByText(/first ask/));
+  await userEvent.click(copyButton()!);
+  const box = screen.getByRole<HTMLTextAreaElement>('textbox');
+  expect(box).toHaveValue('> first ask\n>\n> second ask\n\n');
+  expect(onPrompt).toHaveBeenLastCalledWith('> first ask\n>\n> second ask\n\n');
+  expect(composer.current).toHaveFocus();
+  expect(box.selectionStart).toBe(box.value.length);
+  expect(copyButton()).toBeNull();
+  expect(document.getSelection()!.isCollapsed).toBe(true);
+});
+
+it('appends the quote after an existing draft', async () => {
+  const { onPrompt } = renderQuote('look at this  \n');
+  select(screen.getByText('first line'));
+  await userEvent.click(copyButton()!);
+  expect(screen.getByRole('textbox')).toHaveValue(
+    'look at this\n\n> first line\n\n',
+  );
+  expect(onPrompt).toHaveBeenLastCalledWith('look at this\n\n> first line\n\n');
+});
+
+it('hides the copy button when the selection clears or the transcript scrolls', () => {
+  renderQuote();
+  const line = screen.getByText('first line');
+  select(line);
+  document.getSelection()!.removeAllRanges();
+  fireEvent(document, new Event('selectionchange'));
+  expect(copyButton()).toBeNull();
+
+  select(line);
+  expect(copyButton()).toBeInTheDocument();
+  fireEvent.scroll(line.closest('.overflow-y-auto')!);
+  expect(copyButton()).toBeNull();
 });

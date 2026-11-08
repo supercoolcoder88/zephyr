@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type Ref,
 } from 'react';
+import { flushSync } from 'react-dom';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -60,6 +61,7 @@ export default function ChatThread({
   const picker = useRef<HTMLUListElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState<number[]>([]);
+  const [quote, setQuote] = useState<{ text: string; rect: DOMRect }>();
   const items = thread.items ?? [];
   const turns = groupTurns(items);
 
@@ -106,6 +108,40 @@ export default function ChatThread({
   useEffect(() => {
     menu.current?.children[highlighted]?.scrollIntoView({ block: 'nearest' });
   }, [highlighted]);
+
+  function readSelection() {
+    const sel = document.getSelection();
+    const el = scroller.current;
+    const text = sel?.toString().trim();
+    if (!sel || !text || !el) return;
+    if (!el.contains(sel.anchorNode) || !el.contains(sel.focusNode)) return;
+    return { text, rect: sel.getRangeAt(0).getBoundingClientRect() };
+  }
+
+  useEffect(() => {
+    const show = () => setQuote(readSelection());
+    const check = () => {
+      if (!readSelection()) setQuote(undefined);
+    };
+    document.addEventListener('mouseup', show);
+    document.addEventListener('selectionchange', check);
+    return () => {
+      document.removeEventListener('mouseup', show);
+      document.removeEventListener('selectionchange', check);
+    };
+  }, []);
+
+  function quoteToChat(text: string) {
+    const lines = text.split('\n').map((l) => (l ? `> ${l}` : '>'));
+    const draft = prompt.trimEnd();
+    const next = `${draft ? `${draft}\n\n` : ''}${lines.join('\n')}\n\n`;
+    flushSync(() => edit(next));
+    document.getSelection()?.removeAllRanges();
+    setQuote(undefined);
+    const box = typeof composer === 'object' ? composer?.current : null;
+    box?.focus();
+    box?.setSelectionRange(next.length, next.length);
+  }
 
   function edit(text: string) {
     setPrompt(text);
@@ -159,6 +195,7 @@ export default function ChatThread({
         ref={scroller}
         onScroll={(e) => {
           const el = e.currentTarget;
+          setQuote(undefined);
           pinned.current =
             el.scrollHeight - el.scrollTop - el.clientHeight < 48;
         }}
@@ -219,6 +256,24 @@ export default function ChatThread({
           </div>
         )}
       </div>
+
+      {quote && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => quoteToChat(quote.text)}
+          style={{
+            top: Math.max(4, quote.rect.top - 28),
+            left: Math.min(
+              Math.max(4, quote.rect.right - 140),
+              window.innerWidth - 144,
+            ),
+          }}
+          className="fixed z-10 h-6 w-[140px] bg-paper text-2xs tracking-widest text-void transition-colors duration-150 ease-mech hover:bg-ink"
+        >
+          [ COPY TO CHAT ]
+        </button>
+      )}
 
       <form
         onSubmit={submit}

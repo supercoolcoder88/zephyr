@@ -24,6 +24,9 @@ interface Props {
   subthreads: Subthread[];
 }
 
+// Read threads past this many are tucked into the archive at the bottom.
+const KEEP_INACTIVE = 3;
+
 const nextTheme: Record<string, string> = {
   dark: 'cyber',
   cyber: 'light',
@@ -44,6 +47,7 @@ export default function Sidebar({
 }: Props) {
   const [confirmId, setConfirmId] = useState<string>();
   const [openSub, setOpenSub] = useState<string>();
+  const [showArchived, setShowArchived] = useState(false);
   // The box follows whether any subthread is running; a manual toggle holds
   // only until that changes.
   const running = subthreads.some((s) => s.state === 'running');
@@ -85,6 +89,58 @@ export default function Sidebar({
     );
   }
 
+  const inactive = threads.filter(
+    (t) => !t.draft && threadState(t, runningIds) === 'read',
+  );
+  const archived = inactive
+    .slice(KEEP_INACTIVE)
+    .filter((t) => t.id !== activeId);
+  const current = threads.filter((t) => !archived.includes(t));
+
+  function row(thread: Thread) {
+    const active = thread.id === activeId;
+    const confirming = confirmId === thread.id;
+    return (
+      <div
+        key={thread.key ?? thread.id}
+        onMouseLeave={() => setConfirmId(undefined)}
+        onKeyDown={(e) => e.key === 'Escape' && setConfirmId(undefined)}
+        onBlur={(e) =>
+          !e.currentTarget.contains(e.relatedTarget) && setConfirmId(undefined)
+        }
+        className={`group flex items-center pr-4 transition-colors duration-150 ease-mech ${
+          active ? 'bg-paper text-void' : 'text-ink hover:bg-line'
+        }`}
+      >
+        <button
+          onClick={() => onSelect(thread.id)}
+          className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-4 text-left text-sm"
+        >
+          <span className="flex-1 truncate">{thread.title}</span>
+          <span
+            aria-label={threadState(thread, runningIds)}
+            className={`size-1.5 shrink-0 ${dot[threadState(thread, runningIds)]}`}
+          />
+        </button>
+        {!runningIds.includes(thread.id) && (
+          <button
+            type="button"
+            onClick={() =>
+              confirming ? onDelete(thread.id) : setConfirmId(thread.id)
+            }
+            className={`shrink-0 pl-3 text-2xs tracking-widest transition-[color,opacity] duration-150 ease-mech hover:text-alert ${
+              confirming
+                ? 'text-alert'
+                : `opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 ${active ? 'text-void/50' : 'text-mute'}`
+            }`}
+          >
+            {confirming ? '[ CONFIRM ]' : '[ DEL ]'}
+          </button>
+        )}
+      </div>
+    );
+  }
+
   function toggleTheme() {
     const next = nextTheme[theme ?? 'dark'];
     document.documentElement.dataset.theme = next;
@@ -119,50 +175,22 @@ export default function Sidebar({
         </span>
       </button>
       <nav className="flex-1 overflow-y-auto py-2">
-        {threads.map((thread) => {
-          const active = thread.id === activeId;
-          const confirming = confirmId === thread.id;
-          return (
-            <div
-              key={thread.key ?? thread.id}
-              onMouseLeave={() => setConfirmId(undefined)}
-              onKeyDown={(e) => e.key === 'Escape' && setConfirmId(undefined)}
-              onBlur={(e) =>
-                !e.currentTarget.contains(e.relatedTarget) &&
-                setConfirmId(undefined)
-              }
-              className={`group flex items-center pr-4 transition-colors duration-150 ease-mech ${
-                active ? 'bg-paper text-void' : 'text-ink hover:bg-line'
-              }`}
+        {current.map(row)}
+        {archived.length > 0 && (
+          <>
+            <button
+              type="button"
+              aria-expanded={showArchived}
+              onClick={() => setShowArchived(!showArchived)}
+              className="mt-2 flex h-8 w-full items-center px-4 text-2xs tracking-widest text-mute uppercase transition-colors duration-150 ease-mech hover:bg-line hover:text-ink"
             >
-              <button
-                onClick={() => onSelect(thread.id)}
-                className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-4 text-left text-sm"
-              >
-                <span className="flex-1 truncate">{thread.title}</span>
-                <span
-                  aria-label={threadState(thread, runningIds)}
-                  className={`size-1.5 shrink-0 ${dot[threadState(thread, runningIds)]}`}
-                />
-              </button>
-              {!runningIds.includes(thread.id) && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    confirming ? onDelete(thread.id) : setConfirmId(thread.id)
-                  }
-                  className={`shrink-0 pl-3 text-2xs tracking-widest transition-[color,opacity] duration-150 ease-mech hover:text-alert ${
-                    confirming
-                      ? 'text-alert'
-                      : `opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 ${active ? 'text-void/50' : 'text-mute'}`
-                  }`}
-                >
-                  {confirming ? '[ CONFIRM ]' : '[ DEL ]'}
-                </button>
-              )}
-            </div>
-          );
-        })}
+              {showArchived
+                ? '[ HIDE ARCHIVED ]'
+                : `[ ARCHIVED ${archived.length} ]`}
+            </button>
+            {showArchived && archived.map(row)}
+          </>
+        )}
       </nav>
       {subthreads.length > 0 && (
         <section className="border-t border-line">

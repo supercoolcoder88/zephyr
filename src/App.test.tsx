@@ -408,6 +408,31 @@ it('orders threads by state and clears outcomes once seen', async () => {
   expect(sidebarTitles()).toEqual(['Newest', 'Older', 'Oldest']);
 });
 
+it('archives read threads past the newest three', async () => {
+  agent.listThreads.mockResolvedValue(
+    [5, 4, 3, 2, 1].map((n) => ({ id: `t${n}`, title: `T${n}`, updatedAt: n })),
+  );
+  const user = await open();
+  expect(sidebarTitles()).toEqual(['T5', 'T4', 'T3', '[ ARCHIVED 2 ]']);
+
+  await user.click(screen.getByRole('button', { name: '[ ARCHIVED 2 ]' }));
+  expect(sidebarTitles()).toEqual([
+    'T5',
+    'T4',
+    'T3',
+    '[ HIDE ARCHIVED ]',
+    'T2',
+    'T1',
+  ]);
+
+  await user.click(screen.getByRole('button', { name: /T1/ }));
+  await user.click(screen.getByRole('button', { name: '[ HIDE ARCHIVED ]' }));
+  expect(sidebarTitles()).toEqual(['T5', 'T4', 'T3', 'T1', '[ ARCHIVED 1 ]']);
+
+  await sendPrompt(user, 'go');
+  expect(sidebarTitles()).toEqual(['T1', 'T5', 'T4', 'T3', '[ ARCHIVED 1 ]']);
+});
+
 it('puts a new thread above running threads', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
