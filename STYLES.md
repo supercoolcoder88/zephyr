@@ -23,9 +23,10 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 | `alert`       | `#FF2E4D` | Errors and destructive actions, just as sparse |
 | `ok`          | `#00E676` | Thread status dot: finished, unseen            |
 | `warn`        | `#FF9100` | Thread status dot: needs attention             |
+| `draft`       | `#FFD600` | Thread status dot: unsent draft with text      |
 
 - Light (`<html data-theme="light">`) and cyber (`data-theme="cyber"`, dark navy with white text) modes redefine these tokens in `src/index.css`; components never branch on theme.
-- Thread status dots in the sidebar are the only place `ok` and `warn` appear: cyan running, `alert` error, `ok` done, `warn` needs attention, `mute` read.
+- Thread status dots in the sidebar are the only place `ok`, `warn` and `draft` appear: cyan running, `alert` error, `ok` done, `warn` needs attention, `draft` unsent draft with text, `mute` read.
 - Emphasis is done by **inversion** (`bg-paper text-void`), not by adding colour.
 - Never set long text in cyan. Cyan marks things like rules, outlines, cursors and short status words.
 - No surface gradients. The only gradient allowed is the cyan glow falloff.
@@ -65,21 +66,21 @@ box-shadow:
 
 ## Code blocks
 
-Fenced code in agent output is highlighted by `rehype-highlight` and coloured with the user's neovim theme (aether, One Dark palette), the one deliberate exception to monochrome. It looks the same in every app theme, like a fixed neovim window. The `code-*` tokens are for code blocks only; inline code stays monochrome.
+Fenced code in agent output is highlighted by `rehype-highlight`, the one deliberate exception to monochrome. Each app theme has its own palette: dark uses One Dark, light uses Catppuccin Latte, cyber uses Tokyo Night. The `code-*` tokens are for code blocks only; inline code stays monochrome.
 
-| Token          | Value     | Use                                         |
-| -------------- | --------- | ------------------------------------------- |
-| `code-bg`      | `#1C2028` | Block background                            |
-| `code-line`    | `#15181E` | Block border                                |
-| `code-fg`      | `#ABB2BF` | Default text, variables, operators          |
-| `code-punct`   | `#646A75` | Punctuation, tag brackets                   |
-| `code-comment` | `#5C6370` | Comments (italic)                           |
-| `code-purple`  | `#C678DD` | Keywords, escapes                           |
-| `code-green`   | `#98C379` | Strings                                     |
-| `code-yellow`  | `#E5C07B` | Numbers, literals, types and classes (bold) |
-| `code-blue`    | `#61AFEF` | Functions (bold)                            |
-| `code-cyan`    | `#56B6C2` | Built-ins, properties, params, meta, regex  |
-| `code-red`     | `#E06C75` | Tag names                                   |
+| Token          | Dark      | Light     | Cyber     | Use                                         |
+| -------------- | --------- | --------- | --------- | ------------------------------------------- |
+| `code-bg`      | `#1C2028` | `#E6E9EF` | `#0C1631` | Block background                            |
+| `code-line`    | `#15181E` | `#DCE0E8` | `#16264F` | Block border                                |
+| `code-fg`      | `#ABB2BF` | `#4C4F69` | `#A9B1D6` | Default text, variables, operators          |
+| `code-punct`   | `#646A75` | `#7C7F93` | `#737AA2` | Punctuation, tag brackets                   |
+| `code-comment` | `#5C6370` | `#8C8FA1` | `#565F89` | Comments (italic)                           |
+| `code-purple`  | `#C678DD` | `#8839EF` | `#BB9AF7` | Keywords, escapes                           |
+| `code-green`   | `#98C379` | `#40A02B` | `#9ECE6A` | Strings                                     |
+| `code-yellow`  | `#E5C07B` | `#FE640B` | `#FF9E64` | Numbers, literals, types and classes (bold) |
+| `code-blue`    | `#61AFEF` | `#1E66F5` | `#7AA2F7` | Functions (bold)                            |
+| `code-cyan`    | `#56B6C2` | `#179299` | `#7DCFFF` | Built-ins, properties, params, meta, regex  |
+| `code-red`     | `#E06C75` | `#D20F39` | `#F7768E` | Tag names                                   |
 
 ## Motion
 

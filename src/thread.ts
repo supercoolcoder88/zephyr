@@ -1,6 +1,12 @@
 import type { Subthread, ThreadItem } from './agent-types';
 
-export type ThreadState = 'attention' | 'error' | 'done' | 'running' | 'read';
+export type ThreadState =
+  | 'attention'
+  | 'error'
+  | 'done'
+  | 'running'
+  | 'draft'
+  | 'read';
 
 export interface Thread {
   id: string;
@@ -15,14 +21,24 @@ export interface Thread {
   subthreads?: Subthread[];
   // Not yet a Claude session; id is temporary until the first run's session event.
   draft?: true;
+  // Unsent composer text.
+  prompt?: string;
   // Original draft id, kept as the React key so promotion doesn't remount.
   key?: string;
 }
 
-const order: ThreadState[] = ['attention', 'error', 'done', 'running', 'read'];
+const order: ThreadState[] = [
+  'attention',
+  'error',
+  'done',
+  'running',
+  'draft',
+  'read',
+];
 
 export function threadState(thread: Thread, runningIds: string[]): ThreadState {
   if (runningIds.includes(thread.id)) return 'running';
+  if (thread.draft && thread.prompt?.trim()) return 'draft';
   return thread.status ?? 'read';
 }
 

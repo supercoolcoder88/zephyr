@@ -9,18 +9,25 @@ import {
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
-import type { SlashCommand, ThreadItem } from '../agent-types';
+import type {
+  AgentApi,
+  Model,
+  ModelChoice,
+  SlashCommand,
+  ThreadItem,
+} from '../agent-types';
 import type { Thread } from '../thread';
 
-// Listing commands spawns a CLI, so do it once per workspace.
-const commandLists = new Map<string, Promise<SlashCommand[]>>();
+// Listing commands and models spawns a CLI, so do it once per workspace.
+const catalogs = new Map<string, ReturnType<AgentApi['catalog']>>();
 
 interface Props {
   thread: Thread;
   running: boolean;
   justFinished: boolean;
-  onSend(prompt: string): void;
+  onSend(prompt: string, choice: ModelChoice): void;
   onCancel(): void;
+  onPrompt(text: string): void;
   composer: Ref<HTMLTextAreaElement>;
 }
 
@@ -30,16 +37,28 @@ export default function ChatThread({
   justFinished,
   onSend,
   onCancel,
+  onPrompt,
   composer,
 }: Props) {
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(thread.prompt ?? '');
   const [commands, setCommands] = useState<SlashCommand[]>([]);
+  // Cached so the composer shows the model and effort before the catalog loads.
+  const [models, setModels] = useState<Model[]>(() =>
+    JSON.parse(localStorage.getItem('models') ?? '[]'),
+  );
+  const [choice, setChoice] = useState<ModelChoice>(() =>
+    JSON.parse(localStorage.getItem('model') ?? '{"model":"opus"}'),
+  );
+  const [picking, setPicking] = useState(false);
+  const [hovered, setHovered] = useState<string>();
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   // Follow new output only while the user is at the bottom.
   const pinned = useRef(true);
   const menu = useRef<HTMLUListElement>(null);
+  const picker = useRef<HTMLUListElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState<number[]>([]);
   const items = thread.items ?? [];
   const turns = groupTurns(items);
@@ -64,14 +83,21 @@ export default function ChatThread({
   }, [items.length]);
 
   useEffect(() => {
-    let list = commandLists.get(thread.cwd);
-    if (!list) {
-      list = window.agent.commands(thread.cwd);
-      commandLists.set(thread.cwd, list);
-      list.catch(() => commandLists.delete(thread.cwd));
+    let catalog = catalogs.get(thread.cwd);
+    if (!catalog) {
+      catalog = window.agent.catalog(thread.cwd);
+      catalogs.set(thread.cwd, catalog);
+      catalog.catch(() => catalogs.delete(thread.cwd));
     }
     let live = true;
-    list.then((c) => live && setCommands(c)).catch(() => {});
+    catalog
+      .then((c) => {
+        if (!live) return;
+        setCommands(c.commands);
+        setModels(c.models);
+        localStorage.setItem('models', JSON.stringify(c.models));
+      })
+      .catch(() => {});
     return () => {
       live = false;
     };
@@ -83,13 +109,14 @@ export default function ChatThread({
 
   function edit(text: string) {
     setPrompt(text);
+    onPrompt(text);
     setSelected(0);
     setDismissed(false);
   }
 
   function send(text: string) {
     if (!text.trim() || running) return;
-    onSend(text);
+    onSend(text, choice);
     pinned.current = true;
     edit('');
   }
@@ -98,6 +125,16 @@ export default function ChatThread({
     e?.preventDefault();
     send(prompt);
   }
+
+  function choose(next: ModelChoice) {
+    setChoice(next);
+    localStorage.setItem('model', JSON.stringify(next));
+    setPicking(false);
+    trigger.current?.focus();
+  }
+
+  const current = models.find((m) => m.value === choice.model);
+  const effort = choice.effort ?? current?.defaultEffort;
 
   // Commands that take arguments are completed; the rest run straight away.
   function pick(command: SlashCommand, run: boolean) {
@@ -246,6 +283,139 @@ export default function ChatThread({
           placeholder="Ask the agent…"
           className="max-h-48 min-w-0 flex-1 resize-none border border-line bg-void px-3 py-2 text-sm [field-sizing:content] outline-none placeholder:text-mute focus:border-line-strong"
         />
+        <div
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget)) setPicking(false);
+          }}
+          onKeyDown={(e) => {
+            const el = e.target as HTMLElement;
+            const list = el.closest('[role=menu]');
+            const items = [
+              ...((list ?? picker.current)?.querySelectorAll<HTMLElement>(
+                ':scope > li > button',
+              ) ?? []),
+            ];
+            const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+            let next: Element | null | undefined;
+            if (e.key === 'Escape' && picking) {
+              setPicking(false);
+              next = trigger.current;
+            } else if (step && items.length > 0) {
+              const at = Math.max(items.indexOf(el), step > 0 ? -1 : 0);
+              next = items[(at + step + items.length) % items.length];
+            } else if (e.key === 'ArrowLeft' && list === picker.current) {
+              next = el.parentElement?.querySelector(
+                ':scope > [role=menu] button',
+              );
+            } else if (e.key === 'ArrowRight' && list !== picker.current) {
+              next = list?.parentElement?.firstElementChild;
+            }
+            if (!(next instanceof HTMLElement)) return;
+            e.preventDefault();
+            next.focus();
+          }}
+        >
+          <button
+            ref={trigger}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={picking}
+            onClick={() => {
+              setHovered(choice.model);
+              setPicking(!picking);
+            }}
+            className={`flex h-[38px] items-center gap-2 px-2 text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech hover:text-ink ${
+              picking ? 'text-ink' : 'text-mute'
+            }`}
+          >
+            <span>
+              {current?.displayName ?? choice.model}
+              {effort && ` · ${effort}`}
+            </span>
+            <span aria-hidden>{picking ? '▲' : '▼'}</span>
+          </button>
+          {picking && (
+            <ul
+              ref={picker}
+              role="menu"
+              className="absolute right-3 bottom-full border border-b-0 border-line bg-panel py-1"
+            >
+              {models.map((m) => {
+                const active = m.value === choice.model;
+                return (
+                  <li
+                    key={m.value}
+                    onMouseEnter={() => setHovered(m.value)}
+                    onFocus={() => setHovered(m.value)}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => choose({ model: m.value })}
+                      className={`flex w-full items-center gap-2 py-1 pr-3 pl-2 text-left text-sm whitespace-nowrap transition-colors duration-150 ease-mech ${
+                        hovered === m.value
+                          ? 'bg-paper text-void'
+                          : active
+                            ? 'text-ink'
+                            : 'text-mute'
+                      }`}
+                    >
+                      <span aria-hidden className="w-2">
+                        {active && '>'}
+                      </span>
+                      {m.displayName}
+                      <span
+                        aria-hidden
+                        className={`ml-auto pl-8 text-2xs tracking-widest uppercase ${
+                          hovered === m.value ? '' : 'text-mute'
+                        }`}
+                      >
+                        {active ? effort : m.defaultEffort}
+                      </span>
+                    </button>
+                    {hovered === m.value && m.efforts.length > 0 && (
+                      <ul
+                        role="menu"
+                        aria-label={`${m.displayName} effort`}
+                        className="absolute right-full bottom-0 border border-b-0 border-line bg-panel py-1"
+                      >
+                        {m.efforts.map((level) => {
+                          const on =
+                            level === (active ? effort : m.defaultEffort);
+                          return (
+                            <li key={level}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() =>
+                                  choose({ model: m.value, effort: level })
+                                }
+                                className={`group flex w-full items-center gap-2 py-1 pr-3 pl-2 text-left text-sm whitespace-nowrap transition-colors duration-150 ease-mech hover:bg-paper hover:text-void focus:bg-paper focus:text-void ${
+                                  on ? 'text-ink' : 'text-mute'
+                                }`}
+                              >
+                                <span aria-hidden className="w-2">
+                                  {on && '>'}
+                                </span>
+                                {level}
+                                <span
+                                  aria-hidden
+                                  className="ml-auto pl-6 text-2xs tracking-widest text-mute uppercase group-hover:text-void group-focus:text-void"
+                                >
+                                  {level === m.defaultEffort && 'default'}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
         {running ? (
           <button
             type="button"
@@ -297,7 +467,14 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
           <Markdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeHighlight]}
-            components={{ a: (props) => <a {...props} target="_blank" /> }}
+            components={{
+              a: (props) => <a {...props} target="_blank" />,
+              table: (props) => (
+                <div className="overflow-x-auto">
+                  <table {...props} />
+                </div>
+              ),
+            }}
           >
             {item.text}
           </Markdown>
@@ -316,7 +493,7 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
         .map((k) => input?.[k])
         .find((v): v is string => typeof v === 'string');
       return (
-        <p className="flex gap-2 pl-3 text-2xs text-mute">
+        <p className="flex gap-2 border-l border-transparent pl-3 text-2xs text-mute">
           <span className={`shrink-0 ${live ? 'text-cyan' : ''}`}>
             {item.name.toLowerCase()}
           </span>
@@ -329,14 +506,16 @@ function Item({ item, live }: { item: ThreadItem; live: boolean }) {
     case 'done':
       return (
         !item.ok && (
-          <p className="pl-3 text-2xs tracking-widest text-alert">
+          <p className="border-l border-transparent pl-3 text-2xs tracking-widest text-alert">
             FAILED · {item.result}
           </p>
         )
       );
     case 'error':
       return (
-        <p className="pl-3 text-sm break-words text-alert">{item.message}</p>
+        <p className="border-l border-transparent pl-3 text-sm break-words text-alert">
+          {item.message}
+        </p>
       );
   }
 }

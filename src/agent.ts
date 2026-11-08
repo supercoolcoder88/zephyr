@@ -14,9 +14,13 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
   AgentEvent,
+  Effort,
+  Model,
+  ModelChoice,
   Output,
   SlashCommand,
   ThreadItem,
+  UsageWindow,
 } from './agent-types';
 
 // The SDK is ESM-only and spawns a native Claude Code binary, so it stays
@@ -39,7 +43,6 @@ function packagedClaudeBinary() {
 function options(cwd: string): Options {
   return {
     pathToClaudeCodeExecutable: packagedClaudeBinary(),
-    model: 'claude-opus-5-5',
     cwd,
     tools: { type: 'preset', preset: 'claude_code' },
     systemPrompt: { type: 'preset', preset: 'claude_code' },
@@ -117,6 +120,17 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
   }
 }
 
+// Skills and usage only come from a live CLI, so start one that never gets a prompt.
+async function idleQuery(cwd: string) {
+  const { query } = await loadSdk();
+  return query({
+    prompt: {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+    } as AsyncIterable<SDKUserMessage>,
+    options: options(cwd),
+  });
+}
+
 export function registerAgentIpc() {
   ipcMain.handle(
     'agent:run',
@@ -125,7 +139,8 @@ export function registerAgentIpc() {
       runId: string,
       prompt: string,
       cwd: string,
-      resume?: string,
+      resume: string | undefined,
+      { model, effort }: ModelChoice,
     ) => {
       const target = ipcEvent.sender;
       const abortController = new AbortController();
@@ -137,7 +152,7 @@ export function registerAgentIpc() {
         const { query } = await loadSdk();
         for await (const message of query({
           prompt,
-          options: { ...options(cwd), abortController, resume },
+          options: { ...options(cwd), abortController, resume, model, effort },
         })) {
           forward(target, runId, message);
         }
@@ -214,26 +229,88 @@ export function registerAgentIpc() {
     },
   );
 
-  // Commands only come from a live CLI, so start one that never gets a prompt.
   ipcMain.handle(
-    'agent:commands',
-    async (_, cwd: string): Promise<SlashCommand[]> => {
-      const { query } = await loadSdk();
-      const idle = query({
-        prompt: {
-          [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
-        } as AsyncIterable<SDKUserMessage>,
-        options: options(cwd),
-      });
+    'agent:catalog',
+    async (
+      _,
+      cwd: string,
+    ): Promise<{ commands: SlashCommand[]; models: Model[] }> => {
+      const idle = await idleQuery(cwd);
       try {
-        const commands = await idle.supportedCommands();
-        return commands
-          .map(({ name, description, argumentHint }) => ({
-            name,
-            description,
-            argumentHint,
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name));
+        const [{ skills }, models] = await Promise.all([
+          idle.reloadSkills(),
+          idle.supportedModels(),
+        ]);
+        // getSettings is in the SDK runtime but not its types.
+        const { getSettings } = idle as unknown as {
+          getSettings(): Promise<{ applied: { effort: Effort | null } }>;
+        };
+        const families: Model[] = [];
+        // Family aliases like 'opus' always resolve to the latest version.
+        for (const m of models) {
+          if (m.value === 'default' || m.value.includes('-')) continue;
+          // Switching the idle session's model reveals the effort Claude Code would pick for it.
+          // Models the plan can't switch to (e.g. credit-only) still list, without a default.
+          const effort = await idle
+            .setModel(m.value)
+            .then(() => getSettings.call(idle))
+            .then(
+              ({ applied }) => applied.effort,
+              () => null,
+            );
+          families.push({
+            value: m.value,
+            displayName: m.displayName,
+            efforts: m.supportedEffortLevels ?? [],
+            defaultEffort: effort ?? undefined,
+          });
+        }
+        return {
+          commands: skills
+            .map(({ name, description, argumentHint }) => ({
+              name,
+              description,
+              argumentHint,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+          models: families,
+        };
+      } finally {
+        idle.close();
+      }
+    },
+  );
+
+  ipcMain.handle(
+    'agent:usage',
+    async (_, cwd: string): Promise<UsageWindow[] | null> => {
+      const idle = await idleQuery(cwd);
+      try {
+        const { rate_limits } =
+          await idle.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
+            skipBehaviors: true,
+          });
+        if (!rate_limits) return null;
+        return [
+          { label: '5 hour', window: rate_limits.five_hour },
+          { label: 'Week', window: rate_limits.seven_day },
+          { label: 'Week opus', window: rate_limits.seven_day_opus },
+          { label: 'Week sonnet', window: rate_limits.seven_day_sonnet },
+          ...(rate_limits.model_scoped ?? []).map((w) => ({
+            label: `Week ${w.display_name}`,
+            window: w,
+          })),
+        ].flatMap(({ label, window }) =>
+          window?.utilization == null
+            ? []
+            : [
+                {
+                  label,
+                  utilization: window.utilization,
+                  resetsAt: window.resets_at,
+                },
+              ],
+        );
       } finally {
         idle.close();
       }

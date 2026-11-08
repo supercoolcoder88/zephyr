@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ChatThread from './components/ChatThread';
 import Sidebar from './components/Sidebar';
-import type { ThreadItem } from './agent-types';
+import type { ModelChoice, ThreadItem } from './agent-types';
 import { newThread, sortThreads, type Thread } from './thread';
 
 type Listed = Awaited<ReturnType<typeof window.agent.listThreads>>;
@@ -30,6 +30,7 @@ function merge(
         items: known?.items,
         subthreads: known?.subthreads,
         key: known?.key,
+        prompt: known?.prompt,
       };
     }),
   ];
@@ -119,7 +120,7 @@ export default function App() {
   );
   const active = visible.find((t) => t.id === activeId) ?? visible[0];
 
-  async function send(prompt: string) {
+  async function send(prompt: string, choice: ModelChoice) {
     if (!active) return;
     setDeleteError(undefined);
     const { id, cwd, draft } = active;
@@ -135,7 +136,13 @@ export default function App() {
     setRunningIds((prev) => [...prev, id]);
     setFinishedId(undefined);
     try {
-      await window.agent.run(runId, prompt, cwd, draft ? undefined : id);
+      await window.agent.run(
+        runId,
+        prompt,
+        cwd,
+        draft ? undefined : id,
+        choice,
+      );
     } finally {
       const finished = runs.current.get(runId)!.id;
       runs.current.delete(runId);
@@ -162,9 +169,15 @@ export default function App() {
   }
 
   function select(thread: Thread) {
-    // Leaving or opening a thread marks its outcome as seen.
+    // Leaving or opening a thread marks its outcome as seen; an untouched
+    // draft is dropped once left.
+    const abandoned =
+      active?.id !== thread.id &&
+      active?.draft &&
+      active.items?.length === 0 &&
+      !active.prompt?.trim();
     setThreads((prev) =>
-      prev.map((t) =>
+      (abandoned ? prev.filter((t) => t.id !== active.id) : prev).map((t) =>
         t.id === thread.id || t.id === active?.id
           ? { ...t, status: undefined }
           : t,
@@ -191,7 +204,9 @@ export default function App() {
 
   function create() {
     if (!workspace) return;
-    const empty = visible.find((t) => t.draft && t.items?.length === 0);
+    const empty = visible.find(
+      (t) => t.draft && t.items?.length === 0 && !t.prompt?.trim(),
+    );
     if (empty) {
       select(empty);
       composer.current?.focus();
@@ -281,6 +296,7 @@ export default function App() {
         running={runningIds.includes(active.id)}
         justFinished={finishedId === active.id}
         onSend={send}
+        onPrompt={(prompt) => patch(active.id, (t) => ({ ...t, prompt }))}
         onCancel={() => {
           for (const [runId, run] of runs.current) {
             if (run.id === active.id) window.agent.cancel(runId);

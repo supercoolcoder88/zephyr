@@ -31,16 +31,42 @@ export interface SlashCommand {
   argumentHint: string;
 }
 
+export interface UsageWindow {
+  label: string;
+  // Percent used, 0-100.
+  utilization: number;
+  resetsAt: string | null;
+}
+
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export interface Model {
+  value: string;
+  displayName: string;
+  efforts: Effort[];
+  // What Claude Code uses when no effort is sent.
+  defaultEffort?: Effort;
+}
+
+// No effort means Claude Code's default for the model.
+export interface ModelChoice {
+  model: string;
+  effort?: Effort;
+}
+
 export interface AgentApi {
   run(
     runId: string,
     prompt: string,
     cwd: string,
-    resume?: string,
+    resume: string | undefined,
+    choice: ModelChoice,
   ): Promise<void>;
   pickWorkspace(): Promise<string | undefined>;
-  commands(cwd: string): Promise<SlashCommand[]>;
+  catalog(cwd: string): Promise<{ commands: SlashCommand[]; models: Model[] }>;
   cancel(runId: string): Promise<void>;
+  // Null when plan rate limits don't apply, e.g. API key auth.
+  usage(cwd: string): Promise<UsageWindow[] | null>;
   onEvent(listener: (runId: string, event: AgentEvent) => void): () => void;
   listThreads(
     cwd: string,

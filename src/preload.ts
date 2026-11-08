@@ -4,11 +4,12 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { AgentApi, AgentEvent } from './agent-types';
 
 const agent: AgentApi = {
-  run: (runId, prompt, cwd, resume) =>
-    ipcRenderer.invoke('agent:run', runId, prompt, cwd, resume),
+  run: (runId, prompt, cwd, resume, choice) =>
+    ipcRenderer.invoke('agent:run', runId, prompt, cwd, resume, choice),
   pickWorkspace: () => ipcRenderer.invoke('workspace:pick'),
-  commands: (cwd) => ipcRenderer.invoke('agent:commands', cwd),
+  catalog: (cwd) => ipcRenderer.invoke('agent:catalog', cwd),
   cancel: (runId) => ipcRenderer.invoke('agent:cancel', runId),
+  usage: (cwd) => ipcRenderer.invoke('agent:usage', cwd),
   listThreads: (cwd) => ipcRenderer.invoke('threads:list', cwd),
   loadThread: (sessionId, cwd) =>
     ipcRenderer.invoke('threads:load', sessionId, cwd),

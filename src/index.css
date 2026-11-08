@@ -16,6 +16,7 @@
   --color-alert: #ff2e4d;
   --color-ok: #00e676;
   --color-warn: #ff9100;
+  --color-draft: #ffd600;
 
   --color-code-bg: #1c2028;
   --color-code-line: #15181e;
@@ -55,6 +56,19 @@
   --color-alert: #e0193a;
   --color-ok: #00a152;
   --color-warn: #e06c00;
+  --color-draft: #c9a000;
+
+  --color-code-bg: #e6e9ef;
+  --color-code-line: #dce0e8;
+  --color-code-fg: #4c4f69;
+  --color-code-punct: #7c7f93;
+  --color-code-comment: #8c8fa1;
+  --color-code-red: #d20f39;
+  --color-code-yellow: #fe640b;
+  --color-code-green: #40a02b;
+  --color-code-cyan: #179299;
+  --color-code-blue: #1e66f5;
+  --color-code-purple: #8839ef;
 }
 
 :root[data-theme='cyber'] {
@@ -71,6 +85,19 @@
   --color-alert: #ff2e4d;
   --color-ok: #00e676;
   --color-warn: #ff9100;
+  --color-draft: #ffd600;
+
+  --color-code-bg: #0c1631;
+  --color-code-line: #16264f;
+  --color-code-fg: #a9b1d6;
+  --color-code-punct: #737aa2;
+  --color-code-comment: #565f89;
+  --color-code-red: #f7768e;
+  --color-code-yellow: #ff9e64;
+  --color-code-green: #9ece6a;
+  --color-code-cyan: #7dcfff;
+  --color-code-blue: #7aa2f7;
+  --color-code-purple: #bb9af7;
 }
 
 @layer base {
@@ -204,6 +231,11 @@
     padding: 8px 12px;
     overflow-x: auto;
   }
+  /* Cover the 1px rule + 12px indent so the block spans the column and the rule runs through it. */
+  & > pre {
+    margin-left: -13px;
+    border-left-color: inherit;
+  }
   & :is(.hljs-comment, .hljs-quote) {
     color: var(--color-code-comment);
     font-style: italic;
@@ -265,8 +297,7 @@
   }
   & table {
     border-collapse: collapse;
-    display: block;
-    overflow-x: auto;
+    width: 100%;
   }
   & :is(th, td) {
     border: 1px solid var(--color-line);

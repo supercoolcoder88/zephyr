@@ -15,11 +15,12 @@ const agent = {
   run: vi.fn(),
   pickWorkspace: vi.fn(),
   cancel: vi.fn(),
+  usage: vi.fn(),
   onEvent: vi.fn(),
   listThreads: vi.fn(),
   loadThread: vi.fn(),
   deleteThread: vi.fn(),
-  commands: vi.fn(),
+  catalog: vi.fn(),
 };
 
 beforeEach(() => {
@@ -28,10 +29,27 @@ beforeEach(() => {
   agent.listThreads.mockResolvedValue([]);
   agent.loadThread.mockResolvedValue([]);
   agent.deleteThread.mockResolvedValue(undefined);
-  agent.commands.mockResolvedValue([
-    { name: 'compact', description: 'Summarize', argumentHint: '' },
-    { name: 'review', description: 'Review a PR', argumentHint: '<pr>' },
-  ]);
+  agent.catalog.mockResolvedValue({
+    commands: [
+      { name: 'compact', description: 'Summarize', argumentHint: '' },
+      { name: 'review', description: 'Review a PR', argumentHint: '<pr>' },
+    ],
+    models: [
+      {
+        value: 'opus',
+        displayName: 'Opus 5.5',
+        efforts: ['low', 'high'],
+        defaultEffort: 'high',
+      },
+      {
+        value: 'sonnet',
+        displayName: 'Sonnet 5.5',
+        efforts: ['low', 'high'],
+        defaultEffort: 'low',
+      },
+    ],
+  });
+  localStorage.clear();
   agent.run.mockImplementation(
     (runId: string) =>
       new Promise<void>((resolve) => finishers.set(runId, resolve)),
@@ -136,6 +154,7 @@ it('resumes the session when sending in a loaded thread', async () => {
     'continue',
     '/proj',
     'b',
+    { model: 'opus' },
   );
 });
 
@@ -147,6 +166,7 @@ it('starts a fresh session when sending in a draft', async () => {
     'start',
     '/proj',
     undefined,
+    { model: 'opus' },
   );
 });
 
@@ -161,6 +181,7 @@ it('sends on Enter and inserts a newline on Shift+Enter', async () => {
     'line one\nline two',
     '/proj',
     undefined,
+    { model: 'opus' },
   );
 });
 
@@ -186,6 +207,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
     'first prompt',
     '/proj',
     undefined,
+    { model: 'opus' },
   );
 
   act(() => emit({ type: 'session', sessionId: 'sid' }));
@@ -212,6 +234,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
     'second prompt',
     '/proj',
     'sid',
+    { model: 'opus' },
   );
 });
 
@@ -235,7 +258,9 @@ it('runs threads concurrently and routes events by run', async () => {
   await sendPrompt(user, 'second');
   const runA = lastRunId();
   expect(runA).not.toBe(runB);
-  expect(agent.run).toHaveBeenLastCalledWith(runA, 'second', '/proj', 'a');
+  expect(agent.run).toHaveBeenLastCalledWith(runA, 'second', '/proj', 'a', {
+    model: 'opus',
+  });
 
   act(() => emit({ type: 'text', text: 'answer b' }, runB));
   act(() => emit({ type: 'text', text: 'answer a' }, runA));
@@ -406,7 +431,88 @@ it('runs a slash command picked from the menu', async () => {
     '/compact',
     '/proj',
     undefined,
+    { model: 'opus' },
   );
+});
+
+it('sends with the model and effort picked from the composer', async () => {
+  const user = await open();
+  const picker = screen.getByRole('button', { name: 'Opus 5.5 · high' });
+  await user.click(picker);
+  expect(
+    ['Opus 5.5', 'Sonnet 5.5'].map(
+      (name) => screen.getByRole('menuitem', { name }).textContent,
+    ),
+  ).toEqual(['>Opus 5.5high', 'Sonnet 5.5low']);
+  await user.hover(screen.getByRole('menuitem', { name: 'Sonnet 5.5' }));
+  const efforts = screen.getByRole('menu', { name: 'Sonnet 5.5 effort' });
+  expect(
+    within(efforts)
+      .getAllByRole('menuitem')
+      .map((b) => b.textContent),
+  ).toEqual(['>lowdefault', 'high']);
+  await user.click(within(efforts).getByRole('menuitem', { name: 'high' }));
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(picker).toHaveTextContent('Sonnet 5.5 · high');
+  await sendPrompt(user, 'go');
+  expect(agent.run).toHaveBeenCalledWith(
+    expect.any(String),
+    'go',
+    '/proj',
+    undefined,
+    { model: 'sonnet', effort: 'high' },
+  );
+
+  await act(async () => finishRun());
+  await user.click(picker);
+  await user.click(screen.getByRole('menuitem', { name: 'Sonnet 5.5' }));
+  expect(picker).toHaveTextContent('Sonnet 5.5 · low');
+  await sendPrompt(user, 'again');
+  expect(agent.run).toHaveBeenLastCalledWith(
+    expect.any(String),
+    'again',
+    '/proj',
+    undefined,
+    { model: 'sonnet' },
+  );
+});
+
+it('shows the last known model and effort before the catalog loads', async () => {
+  localStorage.setItem(
+    'models',
+    JSON.stringify([
+      {
+        value: 'opus',
+        displayName: 'Opus 5.5',
+        efforts: ['medium'],
+        defaultEffort: 'medium',
+      },
+    ]),
+  );
+  agent.pickWorkspace.mockResolvedValue('/uncached');
+  agent.catalog.mockReturnValue(new Promise(() => {}));
+  await open();
+  expect(
+    screen.getByRole('button', { name: 'Opus 5.5 · medium' }),
+  ).toBeInTheDocument();
+});
+
+it('picks a model and effort from the keyboard', async () => {
+  const user = await open();
+  const picker = screen.getByRole('button', { name: 'Opus 5.5 · high' });
+  picker.focus();
+  await user.keyboard('{Enter}{ArrowDown}{ArrowDown}');
+  expect(screen.getByRole('menuitem', { name: 'Sonnet 5.5' })).toHaveFocus();
+  await user.keyboard('{ArrowLeft}{ArrowDown}');
+  const efforts = screen.getByRole('menu', { name: 'Sonnet 5.5 effort' });
+  expect(within(efforts).getByRole('menuitem', { name: 'high' })).toHaveFocus();
+  await user.keyboard('{Enter}');
+  expect(picker).toHaveTextContent('Sonnet 5.5 · high');
+  expect(picker).toHaveFocus();
+
+  await user.keyboard('{Enter}{Escape}');
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(picker).toHaveFocus();
 });
 
 it('completes slash commands that take arguments', async () => {
@@ -581,4 +687,27 @@ it('shows a failed run with its reason and no cost', async () => {
   await sendPrompt(user, 'hi');
   act(() => emit({ type: 'done', ok: false, result: 'error_max_turns' }));
   expect(screen.getByText('FAILED · error_max_turns')).toBeInTheDocument();
+});
+
+it('drops an untouched draft when leaving it', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
+});
+
+it('keeps a draft with text as yellow and restores its text', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.type(screen.getByPlaceholderText('Ask the agent…'), 'half typed');
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
+  expect(row(/New thread/).getByLabelText('draft')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: /New thread/ }));
+  expect(screen.getByPlaceholderText('Ask the agent…')).toHaveValue(
+    'half typed',
+  );
 });

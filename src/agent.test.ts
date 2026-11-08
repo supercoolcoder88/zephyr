@@ -201,7 +201,18 @@ describe('agent:run', () => {
       send: (_: string, runId: string, event: unknown) =>
         sent.push([runId, event]),
     };
-    await handlers.get('agent:run')!({ sender }, 'r1', 'go', '/proj');
+    await handlers.get('agent:run')!(
+      { sender },
+      'r1',
+      'go',
+      '/proj',
+      undefined,
+      { model: 'sonnet', effort: 'high' },
+    );
+    expect(sdk.query.mock.lastCall![0].options).toMatchObject({
+      model: 'sonnet',
+      effort: 'high',
+    });
     expect(sent).toEqual([
       ['r1', { type: 'session', sessionId: 'sid' }],
       ['r1', { type: 'text', text: 'hi' }],

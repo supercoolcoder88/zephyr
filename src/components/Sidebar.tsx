@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { Subthread } from '../agent-types';
+import { useEffect, useRef, useState } from 'react';
+import type { Subthread, UsageWindow } from '../agent-types';
 import { threadState, type Thread, type ThreadState } from '../thread';
 
 const dot: Record<ThreadState, string> = {
@@ -7,6 +7,7 @@ const dot: Record<ThreadState, string> = {
   error: 'bg-alert',
   done: 'bg-ok',
   running: 'animate-pulse bg-cyan',
+  draft: 'bg-draft',
   read: 'bg-mute',
 };
 
@@ -50,6 +51,39 @@ export default function Sidebar({
   const showSubs =
     toggled && toggled.running === running ? toggled.show : running;
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
+
+  const [usage, setUsage] = useState<
+    'closed' | 'loading' | 'error' | UsageWindow[] | null
+  >('closed');
+  const footer = useRef<HTMLElement>(null);
+  const usageOpen = usage !== 'closed';
+
+  useEffect(() => {
+    if (!usageOpen) return;
+    const close = (e: Event) => {
+      if (
+        e instanceof KeyboardEvent
+          ? e.key === 'Escape'
+          : !footer.current?.contains(e.target as Node)
+      )
+        setUsage('closed');
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [usageOpen]);
+
+  function toggleUsage() {
+    if (usageOpen) return setUsage('closed');
+    setUsage('loading');
+    window.agent.usage(workspace).then(
+      (windows) => setUsage((u) => (u === 'closed' ? u : windows)),
+      () => setUsage((u) => (u === 'closed' ? u : 'error')),
+    );
+  }
 
   function toggleTheme() {
     const next = nextTheme[theme ?? 'dark'];
@@ -185,7 +219,50 @@ export default function Sidebar({
         </section>
       )}
       {error && <p className="px-4 py-2 text-2xs text-alert">{error}</p>}
-      <footer className="flex h-10 items-center border-t border-line px-4">
+      <footer
+        ref={footer}
+        className="relative flex h-10 items-center gap-3 border-t border-line px-4"
+      >
+        {usage !== 'closed' && (
+          <div
+            role="dialog"
+            aria-label="Usage"
+            className="absolute inset-x-0 bottom-full space-y-3 border-t border-line bg-panel px-4 py-3 text-2xs tracking-widest uppercase"
+          >
+            {usage === 'loading' ? (
+              <p className="text-mute">Loading</p>
+            ) : usage === 'error' ? (
+              <p className="text-alert">Usage unavailable</p>
+            ) : !usage?.length ? (
+              <p className="text-mute">No plan limits</p>
+            ) : (
+              usage.map((w) => (
+                <div key={w.label} className="space-y-1">
+                  <div className="flex justify-between">
+                    <span>{w.label}</span>
+                    <span>{Math.round(w.utilization)}%</span>
+                  </div>
+                  <div className="h-1 bg-line">
+                    <div
+                      className={`h-full ${w.utilization >= 90 ? 'bg-alert' : 'bg-ink'}`}
+                      style={{ width: `${Math.min(w.utilization, 100)}%` }}
+                    />
+                  </div>
+                  {w.resetsAt && (
+                    <p className="text-mute">
+                      Resets{' '}
+                      {new Date(w.resetsAt).toLocaleString(undefined, {
+                        weekday: 'short',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
         <button
           type="button"
           onClick={toggleTheme}
@@ -210,6 +287,24 @@ export default function Sidebar({
                 <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5 13 13M3 13l1.5-1.5M11.5 4.5 13 3" />
               </>
             )}
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={toggleUsage}
+          aria-label="Usage"
+          aria-expanded={usageOpen}
+          className={`transition-colors duration-150 ease-mech hover:text-ink ${!usageOpen ? 'text-mute' : 'text-ink'}`}
+        >
+          <svg
+            viewBox="0 0 16 16"
+            className="size-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="square"
+          >
+            <path d="M2 14h12M4 11v-3M8 11V3M12 11V6" />
           </svg>
         </button>
       </footer>
