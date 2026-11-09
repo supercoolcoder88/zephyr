@@ -6,6 +6,7 @@ import {
   useState,
   type RefObject,
 } from 'react';
+import { MessageSquare } from 'lucide-react';
 import { flushSync } from 'react-dom';
 import type { Image, ModelChoice, ThreadItem } from '../../agent-types';
 import { stateDot, type Thread } from '../../thread';
@@ -14,7 +15,7 @@ import Item, { Questions, summarize } from './Item';
 import SubthreadDialog from './SubthreadDialog';
 import Button from '../ui/Button';
 
-const quoteWidth = 144;
+const quoteWidth = 24;
 
 interface Props {
   thread: Thread;
@@ -262,7 +263,7 @@ export default function ChatThread({
       {quote && (
         <Button
           variant="primary"
-          size="sm"
+          aria-label="Copy to chat"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => quoteToChat(quote.text)}
           style={{
@@ -272,9 +273,14 @@ export default function ChatThread({
               window.innerWidth - quoteWidth - 4,
             ),
           }}
-          className="fixed z-10 w-36"
+          className="fixed z-10 grid size-6 place-items-center"
         >
-          [ COPY TO CHAT ]
+          <MessageSquare
+            size={14}
+            strokeWidth={1.5}
+            strokeLinecap="square"
+            strokeLinejoin="miter"
+          />
         </Button>
       )}
 

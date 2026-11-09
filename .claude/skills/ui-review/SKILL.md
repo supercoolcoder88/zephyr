@@ -9,7 +9,7 @@ description: Launch a throwaway headless zephyr instance and screenshot it to re
 
 ```bash
 node scripts/ui.mjs start [1280x800]      # waits until the app has rendered
-node scripts/ui.mjs click "text=OPEN PROJECT"   # opens the temp workspace, no dialog
+node scripts/ui.mjs click "text=OPEN FOLDER"   # opens the temp workspace, no dialog
 node scripts/ui.mjs shot [file.png]       # prints the PNG path, then Read it
 node scripts/ui.mjs click <css | text=...>
 node scripts/ui.mjs hover <css | text=...>
@@ -21,7 +21,7 @@ node scripts/ui.mjs stop                  # kills the app and deletes /tmp/zephy
 
 ## Workflow
 
-1. `start`, then `click "text=OPEN PROJECT"` to get past the home screen.
+1. `start`, then `click "text=OPEN FOLDER"` to get past the home screen.
 2. Get the UI into the state your change affects, then `shot` and Read the PNG. Check it against `STYLES.md`.
 3. Renderer edits hot-reload into the running instance, so just shoot again. Changes to `main.ts`, `agent.ts`, `backlog.ts` or `preload.ts` need `stop` then `start`.
 4. Always `stop` when done, including after failures.

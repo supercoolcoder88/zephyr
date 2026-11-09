@@ -99,7 +99,7 @@ export default function Sidebar({
         onBlur={(e) =>
           !e.currentTarget.contains(e.relatedTarget) && setConfirmId(undefined)
         }
-        className={`group flex items-center pr-4 transition-colors duration-150 ease-mech ${
+        className={`group relative flex items-center transition-colors duration-150 ease-mech ${
           active ? 'bg-paper text-void' : 'text-ink hover:bg-line'
         }`}
       >
@@ -107,7 +107,7 @@ export default function Sidebar({
           type="button"
           aria-current={active ? 'page' : undefined}
           onClick={() => onSelect(thread.id)}
-          className="flex min-w-0 flex-1 items-center gap-3 py-2 pl-4 text-left text-sm"
+          className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2 text-left text-sm"
         >
           <span
             aria-label={threadState(thread, runningIds)}
@@ -117,7 +117,7 @@ export default function Sidebar({
         </button>
         {!runningIds.includes(thread.id) && (
           <span
-            className={`flex shrink-0 items-center gap-1 pl-3 transition-opacity duration-150 ease-mech ${
+            className={`absolute inset-y-0 right-0 flex items-center gap-1 bg-inherit pr-4 pl-3 transition-opacity duration-150 ease-mech ${
               confirming
                 ? 'text-alert'
                 : `opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 ${active ? 'text-void/50' : 'text-mute'}`

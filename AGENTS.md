@@ -1,8 +1,9 @@
 zephyr is an early-stage agent orchestration tool currently only supporting claude code via Claude Agent SDK and Claude subscription.
 
 # Coding rules
+
 - Do not make architecture or customer facing decisions on your own, always ask the user.
-- Your goal should be to write the least number of lines of code as required without sacrificing readability and efficiency. 
+- Your goal should be to write the least number of lines of code as required without sacrificing readability and efficiency.
 - Keep abstractions thin. Simple examples include: do not reach for interfaces or classes too early, prefer in-line functions if functions are used less than a few times and wide reaching code is bad.
 - Avoid multi-line comments. Comments should be sparingly used only to let the reader understand important breakpoints in the code.
 - Use Behaviour driven tests.
@@ -21,5 +22,3 @@ Components that you create should be intentional and practical. Bad designs incl
 
 - Using unnecessary subheadings under major titles that provide commentary about the title
 - Random pills and excessive labels scattered across the screen
-
-

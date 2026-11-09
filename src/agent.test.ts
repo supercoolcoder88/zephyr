@@ -44,48 +44,22 @@ const session = (
   fields: Record<string, string> = {},
 ) => ({ sessionId, lastModified, summary: '', ...fields });
 
-describe('threads:list', () => {
-  it('lists sessions for the cwd newest first', async () => {
-    sdk.listSessions.mockResolvedValue([
-      session('a', 1, { summary: 'Old' }),
-      session('b', 3, { summary: 'New' }),
-      session('c', 2, { summary: 'Mid' }),
-    ]);
-    expect(await invoke('threads:list', '/proj')).toEqual([
-      { id: 'b', title: 'New', createdAt: 3, updatedAt: 3 },
-      { id: 'c', title: 'Mid', createdAt: 2, updatedAt: 2 },
-      { id: 'a', title: 'Old', createdAt: 1, updatedAt: 1 },
-    ]);
-    expect(sdk.listSessions).toHaveBeenCalledWith({ dir: '/proj' });
-  });
-
-  it('prefers customTitle, then summary, then firstPrompt', async () => {
-    sdk.listSessions.mockResolvedValue([
-      session('a', 5, {
-        customTitle: 'Custom',
-        summary: 'S',
-        firstPrompt: 'P',
-      }),
-      session('b', 4, {
-        customTitle: '',
-        summary: 'Summary',
-        firstPrompt: 'P',
-      }),
-      session('c', 3, { firstPrompt: 'Prompt' }),
-      session('d', 2),
-      session('e', 1, { summary: `  ${'x'.repeat(60)}  ` }),
-    ]);
-    const titles = (
-      (await invoke('threads:list', '/proj')) as { title: string }[]
-    ).map((t) => t.title);
-    expect(titles).toEqual([
-      'Custom',
-      'Summary',
-      'Prompt',
-      'Untitled',
-      'x'.repeat(48),
-    ]);
-  });
+it('lists sessions newest first, titled by custom title, summary or first prompt', async () => {
+  sdk.listSessions.mockResolvedValue([
+    session('a', 1, { customTitle: '', summary: 'Summary', firstPrompt: 'P' }),
+    session('b', 5, { customTitle: 'Custom', summary: 'S', firstPrompt: 'P' }),
+    session('c', 3, { firstPrompt: 'Prompt' }),
+    session('d', 2),
+    session('e', 0, { summary: `  ${'x'.repeat(60)}  ` }),
+  ]);
+  expect(await invoke('threads:list', '/proj')).toEqual([
+    { id: 'b', title: 'Custom', createdAt: 5, updatedAt: 5 },
+    { id: 'c', title: 'Prompt', createdAt: 3, updatedAt: 3 },
+    { id: 'd', title: 'Untitled', createdAt: 2, updatedAt: 2 },
+    { id: 'a', title: 'Summary', createdAt: 1, updatedAt: 1 },
+    { id: 'e', title: 'x'.repeat(48), createdAt: 0, updatedAt: 0 },
+  ]);
+  expect(sdk.listSessions).toHaveBeenCalledWith({ dir: '/proj' });
 });
 
 const message = (
@@ -101,132 +75,104 @@ const message = (
   message: { role: type, content },
 });
 
-describe('threads:load', () => {
-  it('loads the session transcript and parses it into items', async () => {
-    sdk.getSessionMessages.mockResolvedValue([
-      message('user', 'hello'),
-      message('assistant', [
-        { type: 'thinking', thinking: '...' },
-        { type: 'text', text: 'Looking' },
-        { type: 'tool_use', id: 't1', name: 'Read', input: { path: 'a' } },
-      ]),
-      message('user', [
-        { type: 'tool_result', tool_use_id: 't1', content: 'x' },
-      ]),
-      message('assistant', [{ type: 'text', text: 'sub' }], 't1'),
-      message('user', [{ type: 'text', text: 'sub prompt' }], 't1'),
-      message('system', 'compacted'),
-      message('assistant', [{ type: 'text', text: 'Done' }]),
-      message('assistant', []),
-      message('user', [
-        { type: 'text', text: 'line one' },
-        {
-          type: 'image',
-          source: { type: 'base64', media_type: 'image/png', data: 'AAA' },
-        },
-        { type: 'text', text: 'line two' },
-      ]),
-    ]);
-    expect(await invoke('threads:load', 'sid', '/proj')).toEqual([
-      { type: 'user', text: 'hello' },
+it('loads a transcript into items, restoring answers and hiding injected messages', async () => {
+  const questions = [{ question: 'Theme?' }, { question: 'Features?' }];
+  sdk.getSessionMessages.mockResolvedValue([
+    message('user', 'hello'),
+    message('assistant', [
+      { type: 'thinking', thinking: '...' },
       { type: 'text', text: 'Looking' },
-      { type: 'tool', id: 't1', name: 'Read', input: { path: 'a' } },
-      { type: 'text', text: 'Done' },
+      { type: 'tool_use', id: 't1', name: 'Read', input: { path: 'a' } },
+    ]),
+    message('user', [{ type: 'tool_result', tool_use_id: 't1', content: 'x' }]),
+    message('assistant', [{ type: 'text', text: 'sub' }], 't1'),
+    message('user', [{ type: 'text', text: 'sub prompt' }], 't1'),
+    message('system', 'compacted'),
+    message('assistant', [
       {
-        type: 'user',
-        text: 'line one\nline two',
-        images: [{ mediaType: 'image/png', data: 'AAA' }],
-      },
-    ]);
-    expect(sdk.getSessionMessages).toHaveBeenCalledWith('sid', {
-      dir: '/proj',
-    });
-  });
-
-  it('restores answers to questions from the stored result text', async () => {
-    const input = {
-      questions: [{ question: 'Theme?' }, { question: 'Features?' }],
-    };
-    sdk.getSessionMessages.mockResolvedValue([
-      message('assistant', [
-        { type: 'tool_use', id: 'q', name: 'AskUserQuestion', input },
-      ]),
-      message('user', [
-        {
-          type: 'tool_result',
-          tool_use_id: 'q',
-          content:
-            'The user answered: "Theme?"="Dark", "Features?"="Caching, Rust, obviously". Read the answers carefully.',
-        },
-      ]),
-    ]);
-    expect(await invoke('threads:load', 'sid', '/proj')).toEqual([
-      {
-        type: 'tool',
+        type: 'tool_use',
         id: 'q',
         name: 'AskUserQuestion',
-        input: {
-          ...input,
-          answers: {
-            'Theme?': 'Dark',
-            'Features?': 'Caching, Rust, obviously',
-          },
-        },
+        input: { questions },
       },
-    ]);
-  });
-
-  it('shows saved slash commands as typed and hides injected messages', async () => {
-    sdk.getSessionMessages.mockResolvedValue([
-      message(
-        'user',
-        '<command-message>deslop</command-message>\n<command-name>/deslop</command-name>\n<command-args>the repo</command-args>',
-      ),
-      message(
-        'user',
-        '<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>',
-      ),
-      message('user', '<local-command-stdout>Cleared</local-command-stdout>'),
-      message('user', [
-        {
-          type: 'text',
-          text: '<task-notification>\n<task-id>a1</task-id>\n</task-notification>',
-        },
-      ]),
-      message('user', '<agent-message from="a1">report</agent-message>'),
-      message('user', '<b>bold</b> is fine'),
-    ]);
-    expect(await invoke('threads:load', 'sid', '/proj')).toEqual([
-      { type: 'user', text: '/deslop the repo' },
-      { type: 'user', text: '/clear' },
-      { type: 'user', text: '<b>bold</b> is fine' },
-    ]);
-  });
+    ]),
+    message('user', [
+      {
+        type: 'tool_result',
+        tool_use_id: 'q',
+        content:
+          'The user answered: "Theme?"="Dark", "Features?"="Caching, Rust, obviously". Read the answers carefully.',
+      },
+    ]),
+    message('assistant', [{ type: 'text', text: 'Done' }]),
+    message('assistant', []),
+    message('user', [
+      { type: 'text', text: 'line one' },
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'AAA' },
+      },
+      { type: 'text', text: 'line two' },
+    ]),
+    message(
+      'user',
+      '<command-message>deslop</command-message>\n<command-name>/deslop</command-name>\n<command-args>the repo</command-args>',
+    ),
+    message(
+      'user',
+      '<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>',
+    ),
+    message('user', '<local-command-stdout>Cleared</local-command-stdout>'),
+    message('user', [
+      {
+        type: 'text',
+        text: '<task-notification>\n<task-id>a1</task-id>\n</task-notification>',
+      },
+    ]),
+    message('user', '<agent-message from="a1">report</agent-message>'),
+    message('user', '<b>bold</b> is fine'),
+  ]);
+  expect(await invoke('threads:load', 'sid', '/proj')).toEqual([
+    { type: 'user', text: 'hello' },
+    { type: 'text', text: 'Looking' },
+    { type: 'tool', id: 't1', name: 'Read', input: { path: 'a' } },
+    {
+      type: 'tool',
+      id: 'q',
+      name: 'AskUserQuestion',
+      input: {
+        questions,
+        answers: { 'Theme?': 'Dark', 'Features?': 'Caching, Rust, obviously' },
+      },
+    },
+    { type: 'text', text: 'Done' },
+    {
+      type: 'user',
+      text: 'line one\nline two',
+      images: [{ mediaType: 'image/png', data: 'AAA' }],
+    },
+    { type: 'user', text: '/deslop the repo' },
+    { type: 'user', text: '/clear' },
+    { type: 'user', text: '<b>bold</b> is fine' },
+  ]);
+  expect(sdk.getSessionMessages).toHaveBeenCalledWith('sid', { dir: '/proj' });
 });
 
-describe('threads:delete', () => {
-  it('deletes the session in the cwd', async () => {
-    sdk.deleteSession.mockResolvedValue(undefined);
-    await expect(
-      invoke('threads:delete', 'sid', '/proj'),
-    ).resolves.toBeUndefined();
-    expect(sdk.deleteSession).toHaveBeenCalledWith('sid', { dir: '/proj' });
-  });
-
-  it('treats a missing session as deleted', async () => {
-    sdk.deleteSession.mockRejectedValue(
-      new Error('Session sid not found in project directory for /proj'),
-    );
-    await expect(
-      invoke('threads:delete', 'sid', '/proj'),
-    ).resolves.toBeUndefined();
-  });
-
-  it('rejects with any other error', async () => {
-    const error = new Error('EACCES: permission denied');
-    sdk.deleteSession.mockRejectedValue(error);
-    await expect(invoke('threads:delete', 'sid', '/proj')).rejects.toBe(error);
-  });
+it('deletes a session, treating a missing one as deleted', async () => {
+  sdk.deleteSession.mockResolvedValueOnce(undefined);
+  await expect(
+    invoke('threads:delete', 'sid', '/proj'),
+  ).resolves.toBeUndefined();
+  expect(sdk.deleteSession).toHaveBeenCalledWith('sid', { dir: '/proj' });
+  sdk.deleteSession.mockRejectedValueOnce(
+    new Error('Session sid not found in project directory for /proj'),
+  );
+  await expect(
+    invoke('threads:delete', 'sid', '/proj'),
+  ).resolves.toBeUndefined();
+  const error = new Error('EACCES: permission denied');
+  sdk.deleteSession.mockRejectedValueOnce(error);
+  await expect(invoke('threads:delete', 'sid', '/proj')).rejects.toBe(error);
 });
 
 type Step = { value: unknown } | { done: true } | { error: Error };
@@ -325,7 +271,7 @@ describe('agent:send', () => {
       `uuid-${prompt}`,
     );
 
-  it('starts one streaming query and pushes each message into it', async () => {
+  it('keeps one live query per run and updates its model, effort and mode in place', async () => {
     const s = sender();
     await send(s, 's1', 'go', { model: 'sonnet', effort: 'high' }, [], 'sid');
     expect(sdk.query).toHaveBeenCalledTimes(1);
@@ -336,6 +282,9 @@ describe('agent:send', () => {
       resume: 'sid',
       model: 'sonnet',
       effort: 'high',
+      permissionMode: 'default',
+      allowDangerouslySkipPermissions: true,
+      canUseTool: expect.any(Function),
       env: { CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' },
     });
     const q = lastQuery();
@@ -347,7 +296,6 @@ describe('agent:send', () => {
     await send(s, 's1', 'what is this', { model: 'sonnet', effort: 'high' }, [
       { mediaType: 'image/png', data: 'AAA' },
     ]);
-    expect(sdk.query).toHaveBeenCalledTimes(1);
     expect((await q.input.next()).value).toEqual({
       ...userMessage([
         {
@@ -360,57 +308,59 @@ describe('agent:send', () => {
     });
     expect(q.setModel).not.toHaveBeenCalled();
     expect(q.applyFlagSettings).not.toHaveBeenCalled();
-  });
 
-  it('switches model and effort on the live session when the choice changes', async () => {
-    const s = sender();
-    await send(s, 's2', 'a', { model: 'opus', effort: 'high' });
-    const q = lastQuery();
-    await send(s, 's2', 'b', { model: 'sonnet', effort: 'high' });
-    expect(q.setModel).toHaveBeenCalledWith('sonnet');
+    await send(s, 's1', 'b', { model: 'opus', effort: 'high' });
+    expect(q.setModel).toHaveBeenCalledWith('opus');
     expect(q.applyFlagSettings).not.toHaveBeenCalled();
-    await send(s, 's2', 'c', { model: 'sonnet', effort: 'low' });
+    await send(s, 's1', 'c', { model: 'opus', effort: 'low' });
     expect(q.applyFlagSettings).toHaveBeenCalledWith({ effortLevel: 'low' });
     expect(q.setModel).toHaveBeenCalledTimes(1);
-    expect(sdk.query).toHaveBeenCalledTimes(1);
-  });
 
-  it('interrupts the turn and keeps the session live', async () => {
-    const s = sender();
-    await send(s, 's3', 'a');
-    const q = lastQuery();
-    await handlers.get('agent:interrupt')!({}, 's3');
+    const set = (runId: string, permission: string) =>
+      handlers.get('agent:set-permission')!({}, runId, permission);
+    await set('s1', 'auto');
+    expect(q.setPermissionMode).toHaveBeenLastCalledWith('auto');
+    await send(
+      s,
+      's1',
+      'd',
+      { model: 'opus', effort: 'low' },
+      [],
+      undefined,
+      'auto',
+    );
+    expect(q.setPermissionMode).toHaveBeenCalledTimes(1);
+    await send(
+      s,
+      's1',
+      'e',
+      { model: 'opus', effort: 'low' },
+      [],
+      undefined,
+      'plan',
+    );
+    expect(q.setPermissionMode).toHaveBeenLastCalledWith('plan');
+    await set('s1', 'plan');
+    expect(q.setPermissionMode).toHaveBeenCalledTimes(2);
+    await expect(set('none', 'auto')).resolves.toBeUndefined();
+
+    await handlers.get('agent:interrupt')!({}, 's1');
     expect(q.interrupt).toHaveBeenCalledWith({ cancelQueued: true });
-    await send(s, 's3', 'b');
-    expect(sdk.query).toHaveBeenCalledTimes(1);
+    await send(s, 's1', 'f', { model: 'opus', effort: 'low' });
     await expect(handlers.get('agent:interrupt')!({}, 'none')).resolves.toBe(
       undefined,
     );
-  });
-
-  it('reads usage from the thread session after a reply without starting a CLI', async () => {
-    const s = sender();
-    await send(s, 'u1', 'go');
-    lastQuery().step({
-      value: {
-        type: 'result',
-        subtype: 'success',
-        is_error: false,
-        result: 'ok',
-      },
-    });
-    await vi.waitFor(async () =>
-      expect(await invoke('agent:usage')).toEqual([
-        { label: '5 hour', utilization: 40, resetsAt: null },
-      ]),
-    );
     expect(sdk.query).toHaveBeenCalledTimes(1);
+
+    await send(s, 's2', 'a', { model: 'opus' }, [], undefined, 'auto');
+    expect(sdk.query.mock.lastCall![0].options.permissionMode).toBe('auto');
   });
 
-  it('forwards session, blocks, subagent traffic and session state', async () => {
+  it('forwards session, blocks, subagent traffic, answers, state and usage', async () => {
     const s = sender();
     await send(s, 's4', 'go');
     const q = lastQuery();
+    const answers = { 'Which?': 'Left, of course' };
     for (const value of [
       { type: 'system', subtype: 'init', session_id: 'sid' },
       { type: 'system', subtype: 'session_state_changed', state: 'running' },
@@ -456,6 +406,12 @@ describe('agent:send', () => {
         status: 'completed',
       },
       {
+        type: 'user',
+        parent_tool_use_id: null,
+        message: { content: [{ type: 'tool_result', tool_use_id: 'q' }] },
+        tool_use_result: { questions: [], answers },
+      },
+      {
         type: 'result',
         subtype: 'success',
         is_error: false,
@@ -464,7 +420,7 @@ describe('agent:send', () => {
       { type: 'system', subtype: 'session_state_changed', state: 'idle' },
     ])
       q.step({ value });
-    await vi.waitFor(() => expect(s.sent).toHaveLength(11));
+    await vi.waitFor(() => expect(s.sent).toHaveLength(12));
     expect(s.sent).toContainEqual(['s4', { type: 'context', percentage: 12 }]);
     expect(
       s.sent.filter(([, e]) => (e as { type: string }).type !== 'context'),
@@ -484,29 +440,14 @@ describe('agent:send', () => {
         },
       ],
       ['s4', { type: 'subthread-end', id: 't', ok: true }],
+      ['s4', { type: 'answers', id: 'q', answers }],
       ['s4', { type: 'done', ok: true, result: 'ok' }],
       ['s4', { type: 'state', state: 'idle' }],
     ]);
-  });
-
-  it("forwards the user's answers to a question", async () => {
-    const s = sender();
-    await send(s, 's8', 'go');
-    const answers = { 'Which?': 'Left, of course' };
-    lastQuery().step({
-      value: {
-        type: 'user',
-        parent_tool_use_id: null,
-        message: { content: [{ type: 'tool_result', tool_use_id: 'q' }] },
-        tool_use_result: { questions: [], answers },
-      },
-    });
-    await vi.waitFor(() =>
-      expect(s.sent).toContainEqual([
-        's8',
-        { type: 'answers', id: 'q', answers },
-      ]),
-    );
+    expect(await invoke('agent:usage')).toEqual([
+      { label: '5 hour', utilization: 40, resetsAt: null },
+    ]);
+    expect(sdk.query).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -530,7 +471,7 @@ describe('agent:send', () => {
     expect(sdk.query.mock.lastCall![0].options.resume).toBe('sid');
   });
 
-  it('closes a session without reporting an error', async () => {
+  it("closes a session quietly, and all of a sender's sessions when it is destroyed", async () => {
     const s = sender();
     await send(s, 's6', 'a');
     const q = lastQuery();
@@ -541,21 +482,20 @@ describe('agent:send', () => {
     await vi.waitFor(() => expect(s.sent).toEqual([['s6', { type: 'end' }]]));
     await send(s, 's6', 'b');
     expect(sdk.query).toHaveBeenCalledTimes(2);
-  });
 
-  it('starts sessions in the chosen permission mode', async () => {
-    const s = sender();
-    await send(s, 'p1', 'a');
-    expect(sdk.query.mock.lastCall![0].options).toMatchObject({
-      permissionMode: 'default',
-      allowDangerouslySkipPermissions: true,
-      canUseTool: expect.any(Function),
-    });
-    await send(s, 'p2', 'a', { model: 'opus' }, [], undefined, 'auto');
-    expect(sdk.query.mock.lastCall![0].options).toMatchObject({
-      permissionMode: 'auto',
-      allowDangerouslySkipPermissions: true,
-    });
+    const reopened = lastQuery();
+    await send(s, 's7', 'a');
+    const other = lastQuery();
+    s.destroy();
+    expect(reopened.close).toHaveBeenCalled();
+    expect(other.close).toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(s.sent).toEqual([
+        ['s6', { type: 'end' }],
+        ['s6', { type: 'end' }],
+        ['s7', { type: 'end' }],
+      ]),
+    );
   });
 
   const ask = (input: unknown, requestId: string, title?: string) => {
@@ -612,49 +552,23 @@ describe('agent:send', () => {
       behavior: 'deny',
       message: 'The user denied this tool call.',
     });
-    expect(s.sent.at(-1)).toEqual(['p3', { type: 'permission-end', id: 'r2' }]);
-  });
 
-  it("allows a question with the user's answers added to its input", async () => {
-    await send(sender(), 'p6', 'a');
-    const input = { questions: [{ question: 'Which?' }] };
-    const asked = ask(input, 'r1');
-    await answer('p6', 'r1', true, { 'Which?': 'Left' });
+    const questions = { questions: [{ question: 'Which?' }] };
+    const asked = ask(questions, 'r3');
+    await answer('p3', 'r3', true, { 'Which?': 'Left' });
     await expect(asked.result).resolves.toEqual({
       behavior: 'allow',
-      updatedInput: { ...input, answers: { 'Which?': 'Left' } },
+      updatedInput: { ...questions, answers: { 'Which?': 'Left' } },
     });
-  });
 
-  it('denies a pending tool call when it is aborted or the session closes', async () => {
-    const s = sender();
-    await send(s, 'p4', 'a');
-    const aborted = ask({}, 'r1');
+    const aborted = ask({}, 'r4');
     aborted.controller.abort();
     await expect(aborted.result).resolves.toMatchObject({ behavior: 'deny' });
-    expect(s.sent.at(-1)).toEqual(['p4', { type: 'permission-end', id: 'r1' }]);
+    expect(s.sent.at(-1)).toEqual(['p3', { type: 'permission-end', id: 'r4' }]);
 
-    const closed = ask({}, 'r2');
-    await handlers.get('agent:close')!({}, 'p4');
+    const closed = ask({}, 'r5');
+    await handlers.get('agent:close')!({}, 'p3');
     await expect(closed.result).resolves.toMatchObject({ behavior: 'deny' });
-  });
-
-  it('switches the permission mode of the live session', async () => {
-    const s = sender();
-    await send(s, 'p5', 'a');
-    const q = lastQuery();
-    const set = (runId: string, permission: string) =>
-      handlers.get('agent:set-permission')!({}, runId, permission);
-    await set('p5', 'auto');
-    expect(q.setPermissionMode).toHaveBeenLastCalledWith('auto');
-    await send(s, 'p5', 'b', { model: 'opus' }, [], undefined, 'auto');
-    expect(q.setPermissionMode).toHaveBeenCalledTimes(1);
-    await send(s, 'p5', 'c', { model: 'opus' }, [], undefined, 'plan');
-    expect(q.setPermissionMode).toHaveBeenLastCalledWith('plan');
-    await set('p5', 'plan');
-    expect(q.setPermissionMode).toHaveBeenCalledTimes(2);
-    expect(sdk.query).toHaveBeenCalledTimes(1);
-    await expect(set('none', 'auto')).resolves.toBeUndefined();
   });
 
   describe('idle sessions', () => {
@@ -673,10 +587,16 @@ describe('agent:send', () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     });
 
-    it('closes a session once it has been idle for the timeout', async () => {
+    it('closes a session idle for the timeout, restarting it on send, and resumes later', async () => {
       const s = sender();
       await send(s, 'i1', 'a');
       const q = lastQuery();
+      state(q, 'idle');
+      await flush();
+      vi.advanceTimersByTime(IDLE_MS - 1);
+      await send(s, 'i1', 'b');
+      vi.advanceTimersByTime(IDLE_MS);
+      expect(q.close).not.toHaveBeenCalled();
       state(q, 'idle');
       await flush();
       vi.advanceTimersByTime(IDLE_MS - 1);
@@ -686,24 +606,12 @@ describe('agent:send', () => {
       await flush();
       expect(s.sent.map(([, e]) => e)).toEqual([
         { type: 'state', state: 'idle' },
+        { type: 'state', state: 'idle' },
         { type: 'end' },
       ]);
-    });
-
-    it('restarts the timeout after a send', async () => {
-      const s = sender();
-      await send(s, 'i2', 'a');
-      const q = lastQuery();
-      state(q, 'idle');
-      await flush();
-      vi.advanceTimersByTime(IDLE_MS - 1);
-      await send(s, 'i2', 'b');
-      vi.advanceTimersByTime(IDLE_MS);
-      expect(q.close).not.toHaveBeenCalled();
-      state(q, 'idle');
-      await flush();
-      vi.advanceTimersByTime(IDLE_MS);
-      expect(q.close).toHaveBeenCalledTimes(1);
+      await send(s, 'i1', 'c', { model: 'opus' }, [], 'sid');
+      expect(sdk.query).toHaveBeenCalledTimes(2);
+      expect(sdk.query.mock.lastCall![0].options.resume).toBe('sid');
     });
 
     it('never closes a running session or one waiting on permission', async () => {
@@ -732,55 +640,7 @@ describe('agent:send', () => {
       expect(q.close).toHaveBeenCalledTimes(1);
     });
 
-    it('resumes the conversation in a new process after a timeout', async () => {
-      const s = sender();
-      await send(s, 'i4', 'a');
-      state(lastQuery(), 'idle');
-      await flush();
-      vi.advanceTimersByTime(IDLE_MS);
-      await flush();
-      await send(s, 'i4', 'b', { model: 'opus' }, [], 'sid');
-      expect(sdk.query).toHaveBeenCalledTimes(2);
-      expect(sdk.query.mock.lastCall![0].options.resume).toBe('sid');
-    });
-
-    const startIdle = async (
-      s: ReturnType<typeof sender>,
-      runIds: string[],
-    ) => {
-      const queries: FakeQuery[] = [];
-      for (const runId of runIds) {
-        await send(s, runId, 'a');
-        queries.push(lastQuery());
-        state(lastQuery(), 'idle');
-        await flush();
-        vi.advanceTimersByTime(1);
-      }
-      return queries;
-    };
-
-    it('closes the least recently used idle session past the cap', async () => {
-      const s = sender();
-      const [c1, c2, c3, c4] = await startIdle(s, ['c1', 'c2', 'c3', 'c4']);
-      await send(s, 'c5', 'a');
-      expect(c1.close).toHaveBeenCalled();
-      for (const q of [c2, c3, c4]) expect(q.close).not.toHaveBeenCalled();
-      expect(sdk.query).toHaveBeenCalledTimes(5);
-    });
-
-    it('picks the cap victim by last use, not start order', async () => {
-      const s = sender();
-      const [c1, c2, c3, c4] = await startIdle(s, ['l1', 'l2', 'l3', 'l4']);
-      await send(s, 'l1', 'b');
-      state(c1, 'idle');
-      await flush();
-      vi.advanceTimersByTime(1);
-      await send(s, 'l5', 'a');
-      expect(c2.close).toHaveBeenCalled();
-      for (const q of [c1, c3, c4]) expect(q.close).not.toHaveBeenCalled();
-    });
-
-    it('starts past the cap without closing busy sessions', async () => {
+    it('past the cap, closes the least recently used idle session but never a busy one', async () => {
       const s = sender();
       const queries: FakeQuery[] = [];
       for (const runId of ['b1', 'b2', 'b3', 'b4']) {
@@ -790,24 +650,28 @@ describe('agent:send', () => {
       await send(s, 'b5', 'a');
       for (const q of queries) expect(q.close).not.toHaveBeenCalled();
       expect(sdk.query).toHaveBeenCalledTimes(5);
-    });
-  });
+      for (const runId of ['b1', 'b2', 'b3', 'b4', 'b5'])
+        await handlers.get('agent:close')!({}, runId);
 
-  it("closes a sender's sessions when it is destroyed", async () => {
-    const s = sender();
-    await send(s, 's7', 'a');
-    const first = lastQuery();
-    await send(s, 's8', 'a');
-    const second = lastQuery();
-    s.destroy();
-    expect(first.close).toHaveBeenCalled();
-    expect(second.close).toHaveBeenCalled();
-    await vi.waitFor(() =>
-      expect(s.sent).toEqual([
-        ['s7', { type: 'end' }],
-        ['s8', { type: 'end' }],
-      ]),
-    );
+      const idle = async (runId: string, q?: FakeQuery) => {
+        if (!q) await send(s, runId, 'a');
+        state(q ?? lastQuery(), 'idle');
+        await flush();
+        vi.advanceTimersByTime(1);
+        return q ?? lastQuery();
+      };
+      const [l1, l2, l3, l4] = [
+        await idle('l1'),
+        await idle('l2'),
+        await idle('l3'),
+        await idle('l4'),
+      ];
+      await send(s, 'l1', 'b');
+      await idle('l1', l1);
+      await send(s, 'l5', 'a');
+      expect(l2.close).toHaveBeenCalled();
+      for (const q of [l1, l3, l4]) expect(q.close).not.toHaveBeenCalled();
+    });
   });
 });
 

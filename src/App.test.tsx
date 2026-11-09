@@ -167,9 +167,6 @@ const sidebarTitles = () =>
 
 const heading = () => screen.getByRole('heading', { level: 1 }).textContent;
 
-const row = (title: RegExp) =>
-  within(screen.getByRole('button', { name: title }).parentElement!);
-
 async function open() {
   const user = userEvent.setup();
   render(<App />);
@@ -185,28 +182,100 @@ async function sendPrompt(user: User, text: string) {
   );
 }
 
-it('opens the folder it was launched with, skipping the picker', async () => {
+const row = (title: RegExp) =>
+  within(screen.getByRole('button', { name: title }).parentElement!);
+
+async function remove(user: User, title: RegExp) {
+  await user.click(row(title).getByRole('button', { name: 'Delete' }));
+  await user.click(row(title).getByRole('button', { name: '[ CONFIRM ]' }));
+}
+
+async function running() {
+  const user = await open();
+  await sendPrompt(user, 'go');
+  return user;
+}
+
+const finish = async () => {
+  act(() => emit({ type: 'done', ok: true, result: 'ok' }));
+  await act(async () => finishRun());
+};
+
+const permissionCards = () =>
+  screen.queryAllByRole('group', { name: 'Permission request' });
+
+const permission = (
+  id: string,
+  tool = 'Bash',
+  input: object = { command: 'ls' },
+) =>
+  emit({
+    type: 'permission',
+    request: { id, toolUseId: `t${id}`, tool, input },
+  });
+
+const withOldest = [
+  ...list,
+  { id: 'c', title: 'Oldest', createdAt: now - 3, updatedAt: now - 3 },
+];
+
+const entryRow = (name: string) =>
+  screen.getByRole('checkbox', { name }).closest('li')!;
+
+function transfer(data: Record<string, string> = {}) {
+  return {
+    setData: (type: string, value: string) => (data[type] = value),
+    getData: (type: string) => data[type] ?? '',
+    get types() {
+      return Object.keys(data);
+    },
+    effectAllowed: 'all',
+    dropEffect: 'none',
+  };
+}
+
+async function openWithBacklog(list: BacklogEntry[]) {
+  backlog.watch.mockResolvedValue(list);
+  backlog.edit.mockResolvedValue(list);
+  const user = await open();
+  await screen.findByRole('checkbox', { name: list[0].text });
+  return { user, edit: backlog.edit };
+}
+
+it('opens the folder it was launched with as one empty draft', async () => {
   history.replaceState(null, '', '?workspace=%2Flaunched');
   render(<App />);
   await screen.findByRole('navigation');
+  history.replaceState(null, '', '/');
   expect(agent.pickWorkspace).not.toHaveBeenCalled();
   expect(agent.listThreads).toHaveBeenCalledWith('/launched');
-  history.replaceState(null, '', '/');
+  expect(sidebarTitles()).toEqual(['New thread']);
+  expect(screen.getByText('NO MESSAGES YET')).toBeInTheDocument();
+  expect(agent.loadThread).not.toHaveBeenCalled();
 });
 
-it('lists sessions on open and loads the newest', async () => {
+it('lists sessions, opens the newest folded to its answer and loads each thread once', async () => {
+  localStorage.setItem('context', JSON.stringify({ a: 33 }));
   agent.listThreads.mockResolvedValue(list);
-  agent.loadThread.mockResolvedValue([
-    { type: 'user', text: 'old prompt' },
-    { type: 'text', text: 'old answer' },
-    { type: 'tool', id: 'tu', name: 'Read', input: { file_path: 'x.ts' } },
-    { type: 'text', text: 'final answer' },
-  ]);
-  await open();
+  agent.loadThread.mockImplementation(async (id: string) =>
+    id === 'b'
+      ? [
+          { type: 'user', text: 'old prompt' },
+          { type: 'text', text: 'old answer' },
+          {
+            type: 'tool',
+            id: 'tu',
+            name: 'Read',
+            input: { file_path: 'x.ts' },
+          },
+          { type: 'text', text: 'final answer' },
+        ]
+      : [{ type: 'text', text: `body ${id}` }],
+  );
+  const user = await open();
   expect(agent.listThreads).toHaveBeenCalledWith('/proj');
   expect(sidebarTitles()).toEqual(['Newest', 'Older']);
   expect(heading()).toBe('Newest');
-  expect(agent.loadThread).toHaveBeenCalledWith('b', '/proj');
   expect(await screen.findByText('final answer')).toBeInTheDocument();
   expect(screen.getByText('old prompt')).toBeInTheDocument();
   expect(screen.queryByText('old answer')).toBeNull();
@@ -214,31 +283,17 @@ it('lists sessions on open and loads the newest', async () => {
   expect(
     screen.getByRole('button', { name: '[ SHOW THINKING ]' }),
   ).toBeTruthy();
-});
 
-it('shows one empty draft when the project has no sessions', async () => {
-  await open();
-  expect(sidebarTitles()).toEqual(['New thread']);
-  expect(screen.getByText('NO MESSAGES YET')).toBeInTheDocument();
-  expect(agent.loadThread).not.toHaveBeenCalled();
-});
-
-it('loads a thread only the first time it is selected', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  agent.loadThread.mockImplementation(async (id: string) => [
-    { type: 'text', text: `body ${id}` },
-  ]);
-  const user = await open();
-  await screen.findByText('body b');
   await user.click(screen.getByRole('button', { name: /Older/ }));
   expect(await screen.findByText('body a')).toBeInTheDocument();
+  expect(screen.getByText('33% USED')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: /Newest/ }));
   await user.click(screen.getByRole('button', { name: /Older/ }));
   expect(screen.getByText('body a')).toBeInTheDocument();
-  expect(agent.loadThread).toHaveBeenCalledTimes(2);
-  expect(agent.loadThread.mock.calls.filter(([id]) => id === 'a')).toHaveLength(
-    1,
-  );
+  expect(agent.loadThread.mock.calls).toEqual([
+    ['b', '/proj'],
+    ['a', '/proj'],
+  ]);
 });
 
 it('shows a load failure in the chat', async () => {
@@ -248,53 +303,36 @@ it('shows a load failure in the chat', async () => {
   expect(await screen.findByText('transcript missing')).toBeInTheDocument();
 });
 
-it('resumes the session when sending in a loaded thread', async () => {
+it('attaches pasted images, keeps them with a draft and sends them', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
-  await sendPrompt(user, 'continue');
-  expect(agent.send).toHaveBeenCalledWith(
-    expect.any(String),
-    'continue',
-    [],
-    '/proj',
-    'b',
-    { model: 'opus' },
-    'auto',
-    expect.any(String),
-  );
-});
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  const paste = (file = new File(['png'], 'shot.png', { type: 'image/png' })) =>
+    fireEvent.paste(screen.getByPlaceholderText('Ask the agent…'), {
+      clipboardData: { files: [file] },
+    });
+  const removeImage = () =>
+    screen.queryByRole('button', { name: 'Remove image' });
 
-it('starts a fresh session when sending in a draft', async () => {
-  const user = await open();
-  await sendPrompt(user, 'start');
-  expect(agent.send).toHaveBeenCalledWith(
-    expect.any(String),
-    'start',
-    [],
-    '/proj',
-    undefined,
-    { model: 'opus' },
-    'auto',
-    expect.any(String),
+  paste(
+    new File([new Uint8Array(4 * 1024 * 1024)], 'big.png', {
+      type: 'image/png',
+    }),
   );
-});
+  expect(screen.getByText(/IMAGE OVER 5 MB/)).toBeInTheDocument();
+  expect(removeImage()).toBeNull();
 
-it('attaches pasted images and sends them with the prompt', async () => {
-  const user = await open();
-  const box = screen.getByPlaceholderText('Ask the agent…');
-  fireEvent.paste(box, {
-    clipboardData: {
-      files: [new File(['png'], 'shot.png', { type: 'image/png' })],
-    },
-  });
+  paste();
   await user.click(await screen.findByRole('button', { name: 'Remove image' }));
-  expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
-  fireEvent.paste(box, {
-    clipboardData: {
-      files: [new File(['png'], 'shot.png', { type: 'image/png' })],
-    },
-  });
+  expect(removeImage()).toBeNull();
+  paste();
   await screen.findByRole('button', { name: 'Remove image' });
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  expect(removeImage()).toBeNull();
+  expect(row(/New thread/).getByLabelText('draft')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: /New thread/ }));
+  expect(removeImage()).toBeInTheDocument();
+
   await user.click(screen.getByRole('button', { name: '[ SEND ]' }));
   expect(agent.send).toHaveBeenCalledWith(
     expect.any(String),
@@ -306,35 +344,7 @@ it('attaches pasted images and sends them with the prompt', async () => {
     'auto',
     expect.any(String),
   );
-  expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
-});
-
-it('sends on Enter and inserts a newline on Shift+Enter', async () => {
-  const user = await open();
-  await user.type(
-    screen.getByPlaceholderText('Ask the agent…'),
-    'line one{Shift>}{Enter}{/Shift}line two{Enter}',
-  );
-  expect(agent.send).toHaveBeenCalledWith(
-    expect.any(String),
-    'line one\nline two',
-    [],
-    '/proj',
-    undefined,
-    { model: 'opus' },
-    'auto',
-    expect.any(String),
-  );
-});
-
-it('focuses the composer when starting a new thread', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await open();
-  const composer = () => screen.getByPlaceholderText('Ask the agent…');
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
-  expect(composer()).toHaveFocus();
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
-  expect(composer()).toHaveFocus();
+  expect(removeImage()).toBeNull();
 });
 
 it('swaps a draft to its session id and refreshes the list after the run', async () => {
@@ -378,10 +388,13 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   expect(screen.queryByText(/DONE|\$/)).toBeNull();
   expect(agent.loadThread).not.toHaveBeenCalledWith('sid', '/proj');
 
-  await sendPrompt(user, 'second prompt');
+  await user.type(
+    screen.getByPlaceholderText('Ask the agent…'),
+    'second{Shift>}{Enter}{/Shift}prompt{Enter}',
+  );
   expect(agent.send).toHaveBeenLastCalledWith(
     runId,
-    'second prompt',
+    'second\nprompt',
     [],
     '/proj',
     'sid',
@@ -391,14 +404,95 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   );
 });
 
-it('shows no delete control on the running thread', async () => {
+it('keeps drafts with text at the top and drops untouched ones', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
-  expect(row(/Newest/).getByRole('button', { name: 'Delete' })).toBeTruthy();
-  expect(row(/Older/).getByRole('button', { name: 'Delete' })).toBeTruthy();
+  const composer = () => screen.getByPlaceholderText('Ask the agent…');
+  await user.click(screen.getByRole('button', { name: /Older/ }));
   await sendPrompt(user, 'go');
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  expect(composer()).toHaveFocus();
+  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  expect(composer()).toHaveFocus();
+  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
+  await user.click(screen.getByRole('button', { name: /Newest/ }));
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
+
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.type(composer(), 'half typed');
+  await user.click(screen.getByRole('button', { name: /Newest/ }));
+  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
+  expect(row(/New thread/).getByLabelText('draft')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: /New thread/ }));
+  expect(composer()).toHaveValue('half typed');
+
+  await remove(user, /New thread/);
+  expect(agent.deleteThread).not.toHaveBeenCalled();
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
+  expect(heading()).toBe('Newest');
+});
+
+it('deletes threads after confirmation, moving to the next one or a fresh draft', async () => {
+  agent.listThreads.mockResolvedValue(withOldest);
+  agent.loadThread.mockImplementation(async (id: string) => [
+    { type: 'text', text: `body ${id}` },
+  ]);
+  const user = await open();
+  await screen.findByText('body b');
+  const confirm = () =>
+    row(/Older/).queryByRole('button', { name: '[ CONFIRM ]' });
+  for (const cancel of [
+    () => user.hover(screen.getByRole('button', { name: /Newest/ })),
+    () => user.keyboard('{Escape}'),
+    () => user.click(screen.getByRole('button', { name: /Newest/ })),
+  ]) {
+    await user.click(row(/Older/).getByRole('button', { name: 'Delete' }));
+    expect(confirm()).toBeTruthy();
+    await cancel();
+    expect(confirm()).toBeNull();
+    expect(row(/Older/).getByRole('button', { name: 'Delete' })).toBeTruthy();
+  }
+  expect(agent.deleteThread).not.toHaveBeenCalled();
+
+  await remove(user, /Older/);
+  expect(agent.deleteThread).toHaveBeenCalledWith('a', '/proj');
+  expect(sidebarTitles()).toEqual(['Newest', 'Oldest']);
+  expect(heading()).toBe('Newest');
+
+  await remove(user, /Newest/);
+  expect(heading()).toBe('Oldest');
+  expect(await screen.findByText('body c')).toBeInTheDocument();
+
+  await remove(user, /Oldest/);
+  expect(sidebarTitles()).toEqual(['New thread']);
+  expect(heading()).toBe('New thread');
+  expect(screen.getByText('NO MESSAGES YET')).toBeInTheDocument();
+});
+
+it('keeps the row and shows the error when deleting fails', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  agent.deleteThread.mockRejectedValue(new Error('permission denied'));
+  const user = await open();
+  await remove(user, /Older/);
+  expect(await screen.findByText('permission denied')).toBeInTheDocument();
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  expect(screen.queryByText('permission denied')).toBeNull();
+});
+
+it('hides delete on the running thread and closes the live session of a deleted one', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  const user = await running();
+  const runId = lastRunId();
   expect(row(/Newest/).queryByRole('button', { name: 'Delete' })).toBeNull();
   expect(row(/Older/).getByRole('button', { name: 'Delete' })).toBeTruthy();
+  await act(async () => finishRun());
+  await remove(user, /Older/);
+  expect(agent.close).not.toHaveBeenCalled();
+  await remove(user, /Newest/);
+  expect(agent.close).toHaveBeenCalledWith(runId);
+  expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj');
 });
 
 it('runs threads concurrently and routes events by run', async () => {
@@ -437,108 +531,8 @@ it('runs threads concurrently and routes events by run', async () => {
   expect(screen.getByRole('status', { name: 'Working' })).toBeInTheDocument();
 });
 
-it('asks for confirmation before deleting', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await open();
-  await user.click(row(/Older/).getByRole('button', { name: 'Delete' }));
-  expect(agent.deleteThread).not.toHaveBeenCalled();
-  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
-  await user.click(row(/Older/).getByRole('button', { name: '[ CONFIRM ]' }));
-  expect(agent.deleteThread).toHaveBeenCalledWith('a', '/proj');
-  expect(sidebarTitles()).toEqual(['Newest']);
-  expect(heading()).toBe('Newest');
-});
-
-it.each([
-  [
-    'the pointer leaves the row',
-    (user: User) => user.hover(screen.getByRole('button', { name: /Newest/ })),
-  ],
-  ['Escape is pressed', (user: User) => user.keyboard('{Escape}')],
-  [
-    'focus leaves the row',
-    (user: User) =>
-      user.click(screen.getByRole('button', { name: '[ + NEW ]' })),
-  ],
-])('cancels the confirmation when %s', async (_, cancel) => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await open();
-  await user.click(row(/Older/).getByRole('button', { name: 'Delete' }));
-  expect(
-    row(/Older/).getByRole('button', { name: '[ CONFIRM ]' }),
-  ).toBeTruthy();
-  await cancel(user);
-  expect(row(/Older/).getByRole('button', { name: 'Delete' })).toBeTruthy();
-  expect(
-    row(/Older/).queryByRole('button', { name: '[ CONFIRM ]' }),
-  ).toBeNull();
-  expect(agent.deleteThread).not.toHaveBeenCalled();
-});
-
-async function remove(user: User, title: RegExp) {
-  await user.click(row(title).getByRole('button', { name: 'Delete' }));
-  await user.click(row(title).getByRole('button', { name: '[ CONFIRM ]' }));
-}
-
-it('removes a draft without touching the sessions', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
-  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
-  await remove(user, /New thread/);
-  expect(agent.deleteThread).not.toHaveBeenCalled();
-  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
-  expect(heading()).toBe('Newest');
-});
-
-it('selects the next thread after deleting the active one', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  agent.loadThread.mockImplementation(async (id: string) => [
-    { type: 'text', text: `body ${id}` },
-  ]);
-  const user = await open();
-  await screen.findByText('body b');
-  await remove(user, /Newest/);
-  expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj');
-  expect(heading()).toBe('Older');
-  expect(agent.loadThread).toHaveBeenCalledWith('a', '/proj');
-  expect(await screen.findByText('body a')).toBeInTheDocument();
-});
-
-it('leaves a fresh draft after deleting the last thread', async () => {
-  agent.listThreads.mockResolvedValue([list[1]]);
-  const user = await open();
-  await remove(user, /Older/);
-  expect(sidebarTitles()).toEqual(['New thread']);
-  expect(heading()).toBe('New thread');
-  expect(screen.getByText('NO MESSAGES YET')).toBeInTheDocument();
-});
-
-it('keeps the active thread when deleting another', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: /Older/ }));
-  await remove(user, /Newest/);
-  expect(sidebarTitles()).toEqual(['Older']);
-  expect(heading()).toBe('Older');
-});
-
-it('keeps the row and shows the error when deleting fails', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  agent.deleteThread.mockRejectedValue(new Error('permission denied'));
-  const user = await open();
-  await remove(user, /Older/);
-  expect(await screen.findByText('permission denied')).toBeInTheDocument();
-  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
-  await user.click(screen.getByRole('button', { name: /Older/ }));
-  expect(screen.queryByText('permission denied')).toBeNull();
-});
-
 it('keeps threads in creation order and clears outcomes once seen', async () => {
-  agent.listThreads.mockResolvedValue([
-    ...list,
-    { id: 'c', title: 'Oldest', createdAt: now - 3, updatedAt: now - 3 },
-  ]);
+  agent.listThreads.mockResolvedValue(withOldest);
   const user = await open();
   const state = (title: RegExp) =>
     row(title).getByLabelText(/^(attention|error|done|running|read)$/)
@@ -608,10 +602,7 @@ it('archives a thread by hand and unarchives it to the top, across restarts', as
 });
 
 it('opens the next listed thread after deleting an unarchived one', async () => {
-  agent.listThreads.mockResolvedValue([
-    ...list,
-    { id: 'c', title: 'Oldest', createdAt: now - 3, updatedAt: now - 3 },
-  ]);
+  agent.listThreads.mockResolvedValue(withOldest);
   const user = await open();
   await user.click(row(/Oldest/).getByRole('button', { name: 'Archive' }));
   await user.click(screen.getByRole('button', { name: '[ ARCHIVED 1 ]' }));
@@ -623,16 +614,8 @@ it('opens the next listed thread after deleting an unarchived one', async () => 
   expect(heading()).toBe('Newest');
 });
 
-it('puts a new thread at the top', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: /Older/ }));
-  await sendPrompt(user, 'go');
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
-  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
-});
-
-it('runs a slash command picked from the menu', async () => {
+it('completes and runs slash commands, picking up skills added while open', async () => {
+  agent.pickWorkspace.mockResolvedValue('/skills');
   const user = await open();
   const box = screen.getByPlaceholderText('Ask the agent…');
   await user.type(box, '/');
@@ -640,17 +623,107 @@ it('runs a slash command picked from the menu', async () => {
     '/compactSummarize',
     '/review <pr>Review a PR',
   ]);
-  await user.type(box, 'co{Enter}');
+  await user.keyboard('{ArrowDown}');
+  const listbox = screen.getByRole('listbox');
+  expect(box).toHaveAttribute('aria-expanded', 'true');
+  expect(box).toHaveAttribute('aria-controls', listbox.id);
+  expect(box).toHaveAttribute(
+    'aria-activedescendant',
+    screen.getByRole('option', { selected: true, name: /review/ }).id,
+  );
+  await user.keyboard('{Enter}');
+  expect(box).toHaveValue('/review ');
+  expect(box).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(agent.send).not.toHaveBeenCalled();
+
+  await user.clear(box);
+  await user.type(box, '/{Escape}');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  await user.clear(box);
+  await user.type(box, '/co{Enter}');
   expect(agent.send).toHaveBeenCalledWith(
     expect.any(String),
     '/compact',
     [],
-    '/proj',
+    '/skills',
     undefined,
     { model: 'opus' },
     'auto',
     expect.any(String),
   );
+
+  agent.catalog.mockResolvedValue({
+    commands: [{ name: 'deslop', description: 'Clean up', argumentHint: '' }],
+    models: [],
+  });
+  act(() => catalogListener('/skills'));
+  await user.type(box, '/');
+  expect(
+    await screen.findByRole('option', { name: /deslop/ }),
+  ).toBeInTheDocument();
+});
+
+it('colours valid commands and paths, and tab completes @ paths', async () => {
+  agent.paths.mockImplementation(async (_cwd: string, candidates: string[]) =>
+    Object.fromEntries(
+      candidates.flatMap((c) =>
+        c === 'src/App.tsx'
+          ? [[c, 'file']]
+          : c === 'src/'
+            ? [[c, 'folder']]
+            : [],
+      ),
+    ),
+  );
+  agent.complete.mockImplementation(
+    async (_cwd: string, partial: string) =>
+      ({
+        'src/c': ['src/components/'],
+        'src/components/': ['src/components/chat/', 'src/components/Item.tsx'],
+      })[partial] ?? [],
+  );
+  const user = await open();
+  const box = screen.getByPlaceholderText('Ask the agent…');
+  await user.type(
+    box,
+    '/review @src/App.tsx @src/ src/App.tsx @missing.ts{Escape}',
+  );
+  const mirror = box.previousElementSibling!;
+  expect(
+    await within(mirror as HTMLElement).findByText('@src/App.tsx'),
+  ).toHaveClass('text-file');
+  expect(within(mirror as HTMLElement).getByText('/review')).toHaveClass(
+    'text-command',
+  );
+  expect(within(mirror as HTMLElement).getByText('@src/')).toHaveClass(
+    'text-folder',
+  );
+  expect(agent.paths).toHaveBeenLastCalledWith('/proj', [
+    'src/App.tsx',
+    'src/',
+    'missing.ts',
+  ]);
+  expect(mirror.querySelectorAll('.text-file')).toHaveLength(1);
+
+  await user.clear(box);
+  await user.type(box, '/nope');
+  expect(mirror.querySelector('.text-command')).toBeNull();
+
+  await user.clear(box);
+  await user.type(box, 'see @src/c');
+  expect(await screen.findByRole('option', { name: '@src/components/' }));
+  await user.keyboard('{Tab}');
+  expect(box).toHaveValue('see @src/components/');
+  await screen.findByRole('option', { name: '@src/components/Item.tsx' });
+  await user.keyboard('{ArrowDown}{Tab}');
+  expect(box).toHaveValue('see @src/components/Item.tsx ');
+  expect(screen.queryByRole('option')).toBeNull();
+  expect(agent.complete).toHaveBeenCalledWith('/proj', 'src/c');
+  await user.tab();
+  expect(box).toHaveFocus();
+  await user.tab({ shift: true });
+  expect(box).toHaveFocus();
 });
 
 it('sends with the model and effort picked from the composer', async () => {
@@ -752,28 +825,6 @@ it('picks a model and effort from the keyboard', async () => {
   expect(picker).toHaveFocus();
 });
 
-it('completes slash commands that take arguments', async () => {
-  const user = await open();
-  const box = screen.getByPlaceholderText('Ask the agent…');
-  await user.type(box, '/{ArrowDown}');
-  const listbox = screen.getByRole('listbox');
-  expect(box).toHaveAttribute('aria-expanded', 'true');
-  expect(box).toHaveAttribute('aria-controls', listbox.id);
-  expect(box).toHaveAttribute(
-    'aria-activedescendant',
-    screen.getByRole('option', { selected: true, name: /review/ }).id,
-  );
-  await user.keyboard('{Enter}');
-  expect(box).toHaveValue('/review ');
-  expect(box).toHaveAttribute('aria-expanded', 'false');
-  expect(screen.queryByRole('listbox')).toBeNull();
-  expect(agent.send).not.toHaveBeenCalled();
-
-  await user.clear(box);
-  await user.type(box, '/{Escape}');
-  expect(screen.queryByRole('listbox')).toBeNull();
-});
-
 it("lists a turn's subthreads and opens one in a popup", async () => {
   const user = await open();
   await sendPrompt(user, 'go');
@@ -819,160 +870,43 @@ it("lists a turn's subthreads and opens one in a popup", async () => {
   expect(within(sub).getByLabelText('done')).toBeInTheDocument();
 });
 
-it('colours valid slash commands and existing @ paths in the composer', async () => {
-  agent.paths.mockImplementation(async (_cwd: string, candidates: string[]) =>
-    Object.fromEntries(
-      candidates.flatMap((c) =>
-        c === 'src/App.tsx'
-          ? [[c, 'file']]
-          : c === 'src/'
-            ? [[c, 'folder']]
-            : [],
-      ),
-    ),
-  );
-  const user = await open();
-  const box = screen.getByPlaceholderText('Ask the agent…');
-  await user.type(
-    box,
-    '/review @src/App.tsx @src/ src/App.tsx @missing.ts{Escape}',
-  );
-  const mirror = box.previousElementSibling!;
-  expect(
-    await within(mirror as HTMLElement).findByText('@src/App.tsx'),
-  ).toHaveClass('text-file');
-  expect(within(mirror as HTMLElement).getByText('/review')).toHaveClass(
-    'text-command',
-  );
-  expect(within(mirror as HTMLElement).getByText('@src/')).toHaveClass(
-    'text-folder',
-  );
-  expect(agent.paths).toHaveBeenLastCalledWith('/proj', [
-    'src/App.tsx',
-    'src/',
-    'missing.ts',
-  ]);
-  expect(mirror.querySelectorAll('.text-file')).toHaveLength(1);
-
-  await user.clear(box);
-  await user.type(box, '/nope');
-  expect(mirror.querySelector('.text-command')).toBeNull();
-});
-
-it('tab completes @ paths, keeping folders open and spacing after files', async () => {
-  agent.complete.mockImplementation(
-    async (_cwd: string, partial: string) =>
-      ({
-        'src/c': ['src/components/'],
-        'src/components/': ['src/components/chat/', 'src/components/Item.tsx'],
-      })[partial] ?? [],
-  );
-  const user = await open();
-  const box = screen.getByPlaceholderText('Ask the agent…');
-  await user.type(box, 'see @src/c');
-  expect(await screen.findByRole('option', { name: '@src/components/' }));
-  await user.keyboard('{Tab}');
-  expect(box).toHaveValue('see @src/components/');
-  await screen.findByRole('option', { name: '@src/components/Item.tsx' });
-  await user.keyboard('{ArrowDown}{Tab}');
-  expect(box).toHaveValue('see @src/components/Item.tsx ');
-  expect(screen.queryByRole('option')).toBeNull();
-  expect(agent.complete).toHaveBeenCalledWith('/proj', 'src/c');
-});
-
-async function running() {
-  const user = await open();
-  await sendPrompt(user, 'go');
-  return user;
-}
-
-const finish = async () => {
-  act(() => emit({ type: 'done', ok: true, result: 'ok' }));
-  await act(async () => finishRun());
-};
-
-it('shows a tool call as one quiet line', async () => {
-  await running();
-  act(() =>
-    emit({
+it('shows every step while running, then folds the turn to its answer and errors', async () => {
+  const user = await running();
+  for (const e of [
+    { type: 'text', text: 'let me look' },
+    {
       type: 'tool',
-      id: 'tu',
+      id: 't1',
       name: 'Bash',
       input: { command: 'npm test\nmore' },
-    }),
-  );
-  const line = screen.getByText('bash').parentElement!;
-  expect(line).toHaveTextContent('npm test');
-  expect(line.textContent).not.toMatch(/[{}]|more/);
-});
-
-it("shows the agent's questions and options in a box that stays after the run", async () => {
-  await running();
-  act(() =>
-    emit({
-      type: 'tool',
-      id: 'tu',
-      name: 'AskUserQuestion',
-      input: {
-        questions: [
-          {
-            question: 'How should a test open a workspace?',
-            header: 'Workspace',
-            multiSelect: false,
-            options: [
-              { label: 'Env var override', description: 'Skip the dialog.' },
-              { label: 'Main-process inspector', description: 'Patch main.' },
-            ],
-          },
-        ],
-      },
-    }),
-  );
-  act(() => emit({ type: 'done', ok: true, result: '' }));
-  const box = screen.getByRole('group', { name: 'Questions' });
-  expect(box).toHaveTextContent('How should a test open a workspace?');
-  expect(box).toHaveTextContent('01Env var overrideSkip the dialog.');
-  expect(box).toHaveTextContent('02Main-process inspector');
-});
-
-it.each([
-  ['Read', { file_path: '/src/a.ts' }, 'read', '/src/a.ts'],
-  ['Grep', { pattern: 'foo.*bar' }, 'grep', 'foo.*bar'],
-  [
-    'Agent',
-    { description: 'Find usages', prompt: 'long' },
-    'agent',
-    'Find usages',
-  ],
-  ['Mystery', { x: 1 }, 'mystery', '{"x":1}'],
-])('summarises %s input', async (name, input, label, summary) => {
-  await running();
-  act(() => emit({ type: 'tool', id: 'tu', name, input }));
-  expect(screen.getByText(label).parentElement).toHaveTextContent(summary);
-});
-
-const steps: AgentEvent[] = [
-  { type: 'text', text: 'let me look' },
-  { type: 'tool', id: 'tu', name: 'Bash', input: { command: 'ls' } },
-  { type: 'text', text: 'all good' },
-];
-
-it('shows every step while running', async () => {
-  await running();
-  for (const e of steps) act(() => emit(e));
+    },
+    { type: 'tool', id: 't2', name: 'Read', input: { file_path: '/src/a.ts' } },
+    { type: 'tool', id: 't3', name: 'Grep', input: { pattern: 'foo.*bar' } },
+    { type: 'tool', id: 't4', name: 'Mystery', input: { x: 1 } },
+    { type: 'error', message: 'exploded' },
+    { type: 'text', text: 'all good' },
+  ] as AgentEvent[])
+    act(() => emit(e));
+  const line = (label: string) => screen.getByText(label).parentElement!;
   expect(screen.getByText('let me look')).toBeInTheDocument();
-  expect(screen.getByText('bash')).toBeInTheDocument();
-  expect(screen.getByText('all good')).toBeInTheDocument();
-});
+  expect(line('bash')).toHaveTextContent('npm test');
+  expect(line('bash').textContent).not.toMatch(/[{}]|more/);
+  expect(line('read')).toHaveTextContent('/src/a.ts');
+  expect(line('grep')).toHaveTextContent('foo.*bar');
+  expect(line('mystery')).toHaveTextContent('{"x":1}');
 
-it('keeps only the final answer once the run finishes', async () => {
-  await running();
-  for (const e of steps) act(() => emit(e));
   await finish();
   expect(screen.getByText('all good')).toBeInTheDocument();
+  expect(screen.getByText('exploded')).toBeInTheDocument();
   expect(screen.queryByText('let me look')).toBeNull();
   expect(screen.queryByText('bash')).toBeNull();
   expect(screen.queryByText(/DONE|\$/)).toBeNull();
+  await user.click(screen.getByRole('button', { name: '[ SHOW THINKING ]' }));
+  expect(screen.getByText('let me look')).toBeInTheDocument();
+  expect(screen.getByText('bash')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '[ HIDE THINKING ]' }));
+  expect(screen.queryByText('let me look')).toBeNull();
+  expect(screen.queryByText('bash')).toBeNull();
 });
 
 it('keeps text written in response to a subagent', async () => {
@@ -982,7 +916,7 @@ it('keeps text written in response to a subagent', async () => {
       type: 'tool',
       id: 'tu',
       name: 'Agent',
-      input: { description: 'explore' },
+      input: { description: 'explore', prompt: 'long' },
     },
     { type: 'text', text: 'subagent says hi' },
     { type: 'tool', id: 'tu', name: 'Read', input: { file_path: 'a' } },
@@ -993,6 +927,7 @@ it('keeps text written in response to a subagent', async () => {
     { type: 'text', text: 'final' },
   ] as AgentEvent[])
     act(() => emit(e));
+  expect(screen.getByText('agent').parentElement).toHaveTextContent('explore');
   await finish();
   expect(screen.getByText('subagent says hi')).toBeInTheDocument();
   expect(screen.getByText('task says hi')).toBeInTheDocument();
@@ -1001,106 +936,15 @@ it('keeps text written in response to a subagent', async () => {
   expect(screen.queryByText('agent')).toBeNull();
 });
 
-it('toggles hidden items in a finished turn', async () => {
+it('shows a lone answer without a toggle and a failed run with its reason', async () => {
   const user = await running();
-  for (const e of steps) act(() => emit(e));
-  await finish();
-  await user.click(screen.getByRole('button', { name: '[ SHOW THINKING ]' }));
-  expect(screen.getByText('let me look')).toBeInTheDocument();
-  expect(screen.getByText('bash')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: '[ HIDE THINKING ]' }));
-  expect(screen.queryByText('let me look')).toBeNull();
-  expect(screen.queryByText('bash')).toBeNull();
-});
-
-it('shows no toggle when nothing is hidden', async () => {
-  await running();
   act(() => emit({ type: 'text', text: 'just an answer' }));
   await finish();
   expect(screen.getByText('just an answer')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /THINKING/ })).toBeNull();
-});
-
-it('keeps errors visible in a finished turn', async () => {
-  await running();
-  for (const e of [
-    ...steps,
-    { type: 'error', message: 'exploded' },
-    { type: 'tool', id: 'tu', name: 'Bash', input: { command: 'ls' } },
-  ] as AgentEvent[])
-    act(() => emit(e));
-  await finish();
-  expect(screen.getByText('exploded')).toBeInTheDocument();
-  expect(screen.queryByText('bash')).toBeNull();
-});
-
-it('renders bold as strong inside markdown', async () => {
-  await running();
-  act(() => emit({ type: 'text', text: 'this is **loud**' }));
-  const strong = screen.getByText('loud');
-  expect(strong.tagName).toBe('STRONG');
-  expect(strong.closest('.markdown')).not.toBeNull();
-});
-
-it('shows a failed run with its reason and no cost', async () => {
-  const user = await open();
-  await sendPrompt(user, 'hi');
+  await sendPrompt(user, 'again');
   act(() => emit({ type: 'done', ok: false, result: 'error_max_turns' }));
   expect(screen.getByText('FAILED · error_max_turns')).toBeInTheDocument();
-});
-
-it('drops an untouched draft when leaving it', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
-  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
-  await user.click(screen.getByRole('button', { name: /Older/ }));
-  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
-});
-
-it('keeps a draft with text as yellow and restores its text', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
-  await user.type(screen.getByPlaceholderText('Ask the agent…'), 'half typed');
-  await user.click(screen.getByRole('button', { name: /Older/ }));
-  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
-  expect(row(/New thread/).getByLabelText('draft')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: /New thread/ }));
-  expect(screen.getByPlaceholderText('Ask the agent…')).toHaveValue(
-    'half typed',
-  );
-});
-
-it('keeps pasted images with a draft across thread switches', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
-  fireEvent.paste(screen.getByPlaceholderText('Ask the agent…'), {
-    clipboardData: {
-      files: [new File(['png'], 'shot.png', { type: 'image/png' })],
-    },
-  });
-  await screen.findByRole('button', { name: 'Remove image' });
-  await user.click(screen.getByRole('button', { name: /Older/ }));
-  expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
-  expect(row(/New thread/).getByLabelText('draft')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: /New thread/ }));
-  expect(
-    screen.getByRole('button', { name: 'Remove image' }),
-  ).toBeInTheDocument();
-});
-
-it('rejects pasted images over 5 MB', async () => {
-  await open();
-  const big = new File([new Uint8Array(4 * 1024 * 1024)], 'big.png', {
-    type: 'image/png',
-  });
-  fireEvent.paste(screen.getByPlaceholderText('Ask the agent…'), {
-    clipboardData: { files: [big] },
-  });
-  expect(screen.getByText(/IMAGE OVER 5 MB/)).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Remove image' })).toBeNull();
 });
 
 it('queues a message sent while the agent is running into the same run', async () => {
@@ -1140,29 +984,46 @@ it.each([
   ['goes idle', { type: 'state', state: 'idle' }],
   ['ends', { type: 'end' }],
 ] as [string, AgentEvent][])(
-  'stays running after a result until the session %s',
+  'keeps running and asking after a result until the session %s',
   async (_, event) => {
     await running();
+    const working = () => screen.queryByRole('status', { name: 'Working' });
+    const stop = () => screen.queryByRole('button', { name: '[ STOP ]' });
     act(() => emit({ type: 'done', ok: true, result: 'ok' }));
-    expect(screen.getByRole('status', { name: 'Working' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: '[ STOP ]' }),
-    ).toBeInTheDocument();
+    expect(working()).toBeInTheDocument();
+    expect(stop()).toBeInTheDocument();
     act(() => emit({ type: 'state', state: 'running' }));
-    expect(screen.getByRole('status', { name: 'Working' })).toBeInTheDocument();
+    expect(working()).toBeInTheDocument();
     expect(agent.listThreads).toHaveBeenCalledTimes(1);
+
+    act(() => permission('r1'));
+    act(() => permission('r2', 'Read', { file_path: '/x' }));
+    act(() => permission('r3', 'Grep', { pattern: 'y' }));
+    expect(permissionCards().map((c) => c.textContent)).toEqual([
+      expect.stringContaining('Bash'),
+      expect.stringContaining('Read'),
+      expect.stringContaining('Grep'),
+    ]);
+    act(() => emit({ type: 'permission-end', id: 'r2' }));
+    expect(permissionCards().map((c) => c.textContent)).toEqual([
+      expect.stringContaining('Bash'),
+      expect.stringContaining('Grep'),
+    ]);
+
     await act(async () => emit(event));
-    expect(screen.queryByRole('status', { name: 'Working' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '[ STOP ]' })).toBeNull();
+    expect(permissionCards()).toHaveLength(0);
+    expect(working()).toBeNull();
+    expect(stop()).toBeNull();
     expect(agent.listThreads).toHaveBeenCalledTimes(2);
   },
 );
 
-it('stops the turn without ending the session', async () => {
+it('stops the turn without ending the session, showing a failed stop as an error', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await running();
   const runId = lastRunId();
-  await sendPrompt(user, 'queued');
+  await user.type(screen.getByPlaceholderText('Ask the agent…'), 'queued');
+  await user.click(screen.getByRole('button', { name: '[ SEND ]' }));
   expect(screen.getByText('queued')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: '[ STOP ]' }));
   expect(agent.interrupt).toHaveBeenCalledWith(runId);
@@ -1185,25 +1046,10 @@ it('stops the turn without ending the session', async () => {
     expect.any(String),
   );
   expect(agent.close).not.toHaveBeenCalled();
-});
 
-it('shows a failed stop as an error', async () => {
-  const user = await running();
   agent.interrupt.mockRejectedValue(new Error('session closing'));
   await user.click(screen.getByRole('button', { name: '[ STOP ]' }));
   expect(await screen.findByText('session closing')).toHaveClass('text-alert');
-});
-
-it('closes the live session of a deleted thread', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await running();
-  const runId = lastRunId();
-  await act(async () => finishRun());
-  await remove(user, /Older/);
-  expect(agent.close).not.toHaveBeenCalled();
-  await remove(user, /Newest/);
-  expect(agent.close).toHaveBeenCalledWith(runId);
-  expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj');
 });
 
 it("closes the left project's idle sessions and resumes them on return", async () => {
@@ -1267,10 +1113,7 @@ it('defaults to auto mode and switches mode from settings', async () => {
   expect(agent.send.mock.lastCall![6]).toBe('plan');
 });
 
-const permissionCards = () =>
-  screen.queryAllByRole('group', { name: 'Permission request' });
-
-it('answers a pending question with the picked options instead of allow or deny', async () => {
+it('shows a pending question in a box that takes picked options or a skip', async () => {
   const user = await running();
   const runId = lastRunId();
   const input = {
@@ -1304,6 +1147,9 @@ it('answers a pending question with the picked options instead of allow or deny'
   );
   expect(permissionCards()).toHaveLength(0);
   const [box] = screen.getAllByRole('group', { name: 'Questions' });
+  expect(box).toHaveTextContent('Which workspace?');
+  expect(box).toHaveTextContent('01Env varSkip the dialog.');
+  expect(box).toHaveTextContent('02Inspector');
   const submit = within(box).getByRole('button', { name: '[ SUBMIT ]' });
   const [ownWay, otherSuite] = within(box).getAllByRole('textbox', {
     name: 'Other',
@@ -1335,48 +1181,40 @@ it('answers a pending question with the picked options instead of allow or deny'
   expect(
     [...answered.querySelectorAll('[data-answer]')].map((e) => e.textContent),
   ).toEqual(['03My own way', '01CLI', '03Playwright']);
-});
+  act(() => emit({ type: 'done', ok: true, result: '' }));
+  expect(screen.getByRole('group', { name: 'Questions' })).toBe(answered);
 
-it('skips a pending question by denying it', async () => {
-  const user = await running();
-  const input = {
-    questions: [
-      {
-        question: 'Which?',
-        header: 'Pick',
-        options: [{ label: 'A', description: '' }],
-      },
-    ],
-  };
   act(() =>
-    emit({
-      type: 'permission',
-      request: { id: 'r1', toolUseId: 'tu', tool: 'AskUserQuestion', input },
+    permission('r2', 'AskUserQuestion', {
+      questions: [
+        {
+          question: 'Which?',
+          header: 'Pick',
+          options: [{ label: 'A', description: '' }],
+        },
+      ],
     }),
   );
   await user.click(screen.getByRole('button', { name: '[ SKIP ]' }));
-  expect(agent.answerPermission).toHaveBeenCalledWith(
-    lastRunId(),
-    'r1',
+  expect(agent.answerPermission).toHaveBeenLastCalledWith(
+    runId,
+    'r2',
     false,
     undefined,
   );
 });
 
-it('asks to allow a tool call and sends the answer', async () => {
+it('asks to allow or deny a tool call, marking the thread as waiting', async () => {
+  agent.listThreads.mockResolvedValue(list);
   const user = await running();
   const runId = lastRunId();
-  act(() =>
-    emit({
-      type: 'permission',
-      request: {
-        id: 'r1',
-        toolUseId: 'tr1',
-        tool: 'Bash',
-        input: { command: 'rm -rf x\nmore' },
-      },
-    }),
-  );
+  const dot = () =>
+    row(/Newest/).getByLabelText(/^(attention|running)$/).ariaLabel;
+  const wave = () => screen.queryByRole('status', { name: 'Working' });
+  expect(dot()).toBe('running');
+  act(() => permission('r1', 'Bash', { command: 'rm -rf x\nmore' }));
+  expect(dot()).toBe('attention');
+  expect(wave()).toBeNull();
   const [card] = permissionCards();
   expect(card).toHaveTextContent('Bash');
   expect(card).toHaveTextContent('rm -rf x');
@@ -1389,6 +1227,8 @@ it('asks to allow a tool call and sends the answer', async () => {
     undefined,
   );
   expect(permissionCards()).toHaveLength(0);
+  expect(dot()).toBe('running');
+  expect(wave()).toBeInTheDocument();
 
   act(() =>
     emit({
@@ -1416,172 +1256,12 @@ it('asks to allow a tool call and sends the answer', async () => {
   expect(permissionCards()).toHaveLength(0);
 });
 
-it.each([
-  ['goes idle', { type: 'state', state: 'idle' }],
-  ['ends', { type: 'end' }],
-] as [string, AgentEvent][])(
-  'drops permission cards once answered elsewhere or the session %s',
-  async (_, event) => {
-    await running();
-    act(() =>
-      emit({
-        type: 'permission',
-        request: {
-          id: 'r1',
-          toolUseId: 'tr1',
-          tool: 'Bash',
-          input: { command: 'ls' },
-        },
-      }),
-    );
-    act(() =>
-      emit({
-        type: 'permission',
-        request: {
-          id: 'r2',
-          toolUseId: 'tr2',
-          tool: 'Read',
-          input: { file_path: '/x' },
-        },
-      }),
-    );
-    act(() =>
-      emit({
-        type: 'permission',
-        request: {
-          id: 'r3',
-          toolUseId: 'tr3',
-          tool: 'Grep',
-          input: { pattern: 'y' },
-        },
-      }),
-    );
-    expect(permissionCards().map((c) => c.textContent)).toEqual([
-      expect.stringContaining('Bash'),
-      expect.stringContaining('Read'),
-      expect.stringContaining('Grep'),
-    ]);
-    act(() => emit({ type: 'permission-end', id: 'r2' }));
-    expect(permissionCards().map((c) => c.textContent)).toEqual([
-      expect.stringContaining('Bash'),
-      expect.stringContaining('Grep'),
-    ]);
-    await act(async () => emit(event));
-    expect(permissionCards()).toHaveLength(0);
-  },
-);
-
-it('marks a thread as waiting while a tool call needs permission', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  const user = await running();
-  const dot = () =>
-    row(/Newest/).getByLabelText(/^(attention|running)$/).ariaLabel;
-  expect(dot()).toBe('running');
-  act(() =>
-    emit({
-      type: 'permission',
-      request: {
-        id: 'r1',
-        toolUseId: 'tr1',
-        tool: 'Bash',
-        input: { command: 'ls' },
-      },
-    }),
-  );
-  expect(dot()).toBe('attention');
-  expect(screen.queryByRole('status', { name: 'Working' })).toBeNull();
-  await user.click(screen.getByRole('button', { name: '[ ALLOW ]' }));
-  expect(dot()).toBe('running');
-  expect(screen.getByRole('status', { name: 'Working' })).toBeInTheDocument();
-});
-
-it('opens settings from the sidebar cog and closes it from X, Escape or outside click', async () => {
-  agent.usage.mockResolvedValue(null);
-  const user = await open();
-  const cog = screen.getByRole('button', { name: 'Settings' });
-  const settings = () => screen.queryByRole('dialog', { name: 'Settings' });
-
-  await user.click(cog);
-  expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
-  await user.click(screen.getByRole('button', { name: 'Usage' }));
-  expect(await screen.findByText('No plan limits')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Close' }));
-  expect(settings()).toBeNull();
-  expect(cog).toHaveFocus();
-
-  await user.click(cog);
-  expect(
-    screen.getByRole('heading', { name: 'Appearance' }),
-  ).toBeInTheDocument();
-  await user.keyboard('{Escape}');
-  expect(settings()).toBeNull();
-
-  await user.click(cog);
-  await user.click(settings()!.parentElement!);
-  expect(settings()).toBeNull();
-});
-
-it('lists usage limits and hotkeys in settings', async () => {
-  agent.usage.mockResolvedValue([
-    { label: 'Session', utilization: 42.4, resetsAt: null },
-  ]);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
-  await user.click(screen.getByRole('button', { name: 'Usage' }));
-  expect(screen.getByText('Session')).toBeInTheDocument();
-  expect(screen.getByText('42%')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Hotkeys' }));
-  expect(screen.getByText('Toggle backlog')).toBeInTheDocument();
-  expect(screen.getByText('Ctrl + T')).toBeInTheDocument();
-});
-
-it('shows the last usage seen when none was fetched this run', async () => {
-  localStorage.setItem(
-    'usage',
-    JSON.stringify([{ label: 'Week', utilization: 61, resetsAt: null }]),
-  );
-  agent.usage.mockResolvedValue(null);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
-  await user.click(screen.getByRole('button', { name: 'Usage' }));
-  expect(await screen.findByText('61%')).toBeInTheDocument();
-});
-
-it('shows the last context used by a thread before it gets a new reply', async () => {
-  localStorage.setItem('context', JSON.stringify({ a: 33 }));
-  agent.listThreads.mockResolvedValue(list);
-  agent.loadThread.mockResolvedValue([{ type: 'text', text: 'old answer' }]);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: /Older/ }));
-  expect(await screen.findByText('33% USED')).toBeInTheDocument();
-});
-
-it('switches theme from settings and remembers it', async () => {
-  agent.usage.mockResolvedValue(null);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
-  await user.click(screen.getByRole('radio', { name: 'light' }));
-  expect(screen.getByRole('radio', { name: 'light' })).toBeChecked();
-  expect(document.documentElement.dataset.theme).toBe('light');
-  expect(localStorage.getItem('theme')).toBe('light');
-});
-
 it('keeps a pending permission when another thread finishes', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
   await sendPrompt(user, 'first');
   const runB = lastRunId();
-  act(() =>
-    emit({
-      type: 'permission',
-      request: {
-        id: 'r1',
-        toolUseId: 'tr1',
-        tool: 'Bash',
-        input: { command: 'ls' },
-      },
-    }),
-  );
+  act(() => permission('r1'));
   await user.click(screen.getByRole('button', { name: /Older/ }));
   await sendPrompt(user, 'second');
   await act(async () => finishRun());
@@ -1596,43 +1276,149 @@ it('keeps a pending permission when another thread finishes', async () => {
   );
 });
 
-it('hides the working wave while waiting for permission', async () => {
-  const user = await running();
-  const wave = () => screen.queryByRole('status', { name: 'Working' });
-  expect(wave()).toBeInTheDocument();
-  act(() =>
-    emit({
-      type: 'permission',
-      request: {
-        id: 'r1',
-        toolUseId: 'tr1',
-        tool: 'Bash',
-        input: { command: 'ls' },
-      },
-    }),
-  );
-  expect(wave()).toBeNull();
-  await user.click(screen.getByRole('button', { name: '[ ALLOW ]' }));
-  expect(wave()).toBeInTheDocument();
+it('opens settings to switch theme and read usage and hotkeys, closing from X, Escape or outside', async () => {
+  agent.usage.mockResolvedValue([
+    { label: 'Session', utilization: 42.4, resetsAt: null },
+  ]);
+  const user = await open();
+  const cog = screen.getByRole('button', { name: 'Settings' });
+  const settings = () => screen.queryByRole('dialog', { name: 'Settings' });
+
+  await user.click(cog);
+  expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
+  expect(screen.queryByTitle('Update available')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Update' })).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Usage' }));
+  expect(screen.getByText('Session')).toBeInTheDocument();
+  expect(screen.getByText('42%')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Hotkeys' }));
+  expect(screen.getByText('Toggle backlog')).toBeInTheDocument();
+  expect(screen.getByText('Ctrl + T')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Close' }));
+  expect(settings()).toBeNull();
+  expect(cog).toHaveFocus();
+
+  await user.click(cog);
+  expect(
+    screen.getByRole('heading', { name: 'Appearance' }),
+  ).toBeInTheDocument();
+  await user.click(screen.getByRole('radio', { name: 'light' }));
+  expect(screen.getByRole('radio', { name: 'light' })).toBeChecked();
+  expect(document.documentElement.dataset.theme).toBe('light');
+  expect(localStorage.getItem('theme')).toBe('light');
+  await user.keyboard('{Escape}');
+  expect(settings()).toBeNull();
+
+  await user.click(cog);
+  await user.click(settings()!.parentElement!);
+  expect(settings()).toBeNull();
 });
 
-it('shows the project entries, edits them and follows changes on disk', async () => {
+it('shows the last usage seen when none was fetched this run', async () => {
+  agent.usage.mockResolvedValue(null);
+  let user = await open();
+  const showUsage = async () => {
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Usage' }));
+  };
+  await showUsage();
+  expect(await screen.findByText('No plan limits')).toBeInTheDocument();
+
+  cleanup();
+  localStorage.setItem(
+    'usage',
+    JSON.stringify([{ label: 'Week', utilization: 61, resetsAt: null }]),
+  );
+  user = await open();
+  await showUsage();
+  expect(await screen.findByText('61%')).toBeInTheDocument();
+});
+
+it('offers an update from settings, reporting failed installs so they can be retried', async () => {
+  agent.usage.mockResolvedValue(null);
+  update.check.mockResolvedValue({
+    commits: ['Settings page', 'Faster entries'],
+    error: 'Update failed, see /tmp/zephyr-update.log',
+  });
+  update.install.mockResolvedValueOnce('fatal: Not possible to fast-forward');
+  const user = await open();
+  expect(await screen.findByTitle('Update available')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Update' }));
+  expect(screen.getByText('Faster entries')).toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveTextContent('Update failed');
+
+  const install = () =>
+    user.click(
+      screen.getByRole('button', { name: /UPDATE AND RESTART|UPDATING/ }),
+    );
+  await install();
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Not possible to fast-forward',
+  );
+  expect(
+    screen.getByRole('button', { name: '[ UPDATE AND RESTART ]' }),
+  ).toBeEnabled();
+  await install();
+  expect(update.install).toHaveBeenLastCalledWith(expect.any(String));
+  expect(screen.getByRole('button', { name: '[ UPDATING ]' })).toBeDisabled();
+});
+
+it('cycles threads with Ctrl+Tab and opens a thread, settings or a workspace from the keyboard', async () => {
+  agent.listThreads.mockResolvedValue(withOldest);
+  agent.usage.mockResolvedValue(null);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: /Oldest/ }));
+  await sendPrompt(user, 'go');
+  await user.click(screen.getByRole('button', { name: /Newest/ }));
+
+  await user.keyboard('{Control>}{Tab}{/Control}');
+  expect(heading()).toBe('Oldest');
+  await user.keyboard('{Control>}{Tab}{/Control}');
+  expect(heading()).toBe('Newest');
+  await user.keyboard('{Control>}{Shift>}{Tab}{/Shift}{/Control}');
+  expect(heading()).toBe('Oldest');
+
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Hotkeys' }));
+  await user.click(screen.getByRole('radio', { name: 'all' }));
+  await user.keyboard('{Escape}');
+  await user.keyboard('{Control>}{Shift>}{Tab}{/Shift}{/Control}');
+  expect(heading()).toBe('Older');
+
+  await user.keyboard('{Control>}n{/Control}');
+  expect(heading()).toBe('New thread');
+  await user.keyboard('{Control>},{/Control}');
+  expect(screen.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await user.keyboard('{Escape}');
+  await user.keyboard('{Control>}o{/Control}');
+  expect(agent.pickWorkspace).toHaveBeenCalledTimes(2);
+});
+
+it('shows the project backlog, edits it and follows changes on disk', async () => {
   let change: (cwd: string, entries: BacklogEntry[]) => void = () => undefined;
   backlog.onChange.mockImplementation((l) => {
     change = l;
     return () => undefined;
   });
-  backlog.watch.mockResolvedValue([{ line: 0, text: 'ship', done: false }]);
+  const ship = { line: 1, text: 'ship', done: false };
+  const old = { line: 0, text: 'old', done: true };
+  const later = { line: 2, text: 'later', done: false };
+  backlog.watch.mockResolvedValue([ship, old, later]);
   backlog.edit.mockResolvedValue([
-    { line: 0, text: 'ship', done: false },
-    { line: 1, text: 'docs', done: false },
+    ship,
+    old,
+    later,
+    { line: 3, text: 'docs', done: false },
   ]);
   const user = await open();
+  const labels = () =>
+    screen.getAllByRole('checkbox').map((c) => c.getAttribute('aria-label'));
   expect(backlog.watch).toHaveBeenCalledWith('/proj');
   await user.click(await screen.findByRole('checkbox', { name: 'ship' }));
   expect(backlog.edit).toHaveBeenCalledWith('/proj', {
     type: 'toggle',
-    entry: { line: 0, text: 'ship', done: false },
+    entry: ship,
   });
   await user.type(screen.getByLabelText('New backlog entry'), 'docs{Enter}');
   expect(backlog.edit).toHaveBeenLastCalledWith('/proj', {
@@ -1641,149 +1427,24 @@ it('shows the project entries, edits them and follows changes on disk', async ()
   });
   expect(screen.getByLabelText('New backlog entry')).toHaveValue('');
   await screen.findByRole('checkbox', { name: 'docs' });
+  expect(labels()).toEqual(['ship', 'later', 'docs']);
+
+  await user.click(screen.getByRole('button', { name: '[ DONE 1 ]' }));
+  expect(labels()).toEqual(['ship', 'later', 'docs', 'old']);
+  expect(screen.getByRole('checkbox', { name: 'old' })).toBeChecked();
+  await user.click(screen.getByRole('button', { name: '[ HIDE DONE ]' }));
+  expect(labels()).toEqual(['ship', 'later', 'docs']);
+
   act(() => change('/other', []));
   expect(screen.getByRole('checkbox', { name: 'docs' })).toBeInTheDocument();
   act(() => change('/proj', [{ line: 0, text: 'ship', done: true }]));
-  expect(screen.queryByRole('checkbox', { name: 'ship' })).toBeNull();
-  expect(screen.queryByRole('checkbox', { name: 'docs' })).toBeNull();
+  expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   expect(screen.getByRole('button', { name: '[ DONE 1 ]' })).toBeVisible();
-});
-
-const entryRow = (name: string) =>
-  screen.getByRole('checkbox', { name }).closest('li')!;
-
-function transfer(data: Record<string, string> = {}) {
-  return {
-    setData: (type: string, value: string) => (data[type] = value),
-    getData: (type: string) => data[type] ?? '',
-    get types() {
-      return Object.keys(data);
-    },
-    effectAllowed: 'all',
-    dropEffect: 'none',
-  };
-}
-
-async function openWithBacklog(list: BacklogEntry[]) {
-  backlog.watch.mockResolvedValue(list);
-  backlog.edit.mockResolvedValue(list);
-  const user = await open();
-  await screen.findByRole('checkbox', { name: list[0].text });
-  return { user, edit: backlog.edit };
-}
-
-it('hides done entries until they are shown', async () => {
-  const { user } = await openWithBacklog([
-    { line: 0, text: 'ship', done: false },
-    { line: 1, text: 'docs', done: true },
-  ]);
-  expect(screen.queryByRole('checkbox', { name: 'docs' })).toBeNull();
-  await user.click(screen.getByRole('button', { name: '[ DONE 1 ]' }));
-  expect(screen.getByRole('checkbox', { name: 'docs' })).toBeChecked();
-  await user.click(screen.getByRole('button', { name: '[ HIDE DONE ]' }));
-  expect(screen.queryByRole('checkbox', { name: 'docs' })).toBeNull();
-  expect(screen.getByRole('checkbox', { name: 'ship' })).toBeInTheDocument();
-});
-
-it('toggles the entry panel from its icon button and the separator lines', async () => {
-  const user = await open();
-  const toggle = screen.getByRole('button', { name: 'Hide backlog' });
-  expect(toggle.querySelector('svg.lucide')).not.toBeNull();
-  expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  await user.click(toggle);
-  expect(toggle).toHaveAccessibleName('Show backlog');
-  expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  const line = toggle.parentElement!.firstElementChild!;
-  await user.click(line);
-  expect(toggle).toHaveAccessibleName('Hide backlog');
-  fireEvent.pointerDown(line, { clientX: 100, clientY: 100 });
-  fireEvent.pointerMove(line, { clientX: 140, clientY: 100 });
-  fireEvent.pointerUp(line, { clientX: 140, clientY: 100 });
-  fireEvent.click(line, { clientX: 140, clientY: 100, detail: 1 });
-  expect(toggle).toHaveAccessibleName('Hide backlog');
-});
-
-it('keeps the panel snap animation running for the full duration after a second toggle', async () => {
-  await open();
-  vi.useFakeTimers();
-  onTestFinished(() => {
-    vi.useRealTimers();
-  });
-  const toggle = screen.getByRole('button', { name: 'Hide backlog' });
-  const snapping = () => document.querySelector('[data-snap]') !== null;
-  expect(snapping()).toBe(false);
-  fireEvent.click(toggle);
-  expect(snapping()).toBe(true);
-  act(() => vi.advanceTimersByTime(150));
-  fireEvent.click(toggle);
-  act(() => vi.advanceTimersByTime(150));
-  expect(snapping()).toBe(true);
-  act(() => vi.advanceTimersByTime(50));
-  expect(snapping()).toBe(false);
-  fireEvent.click(toggle);
-  const timers = vi.getTimerCount();
-  cleanup();
-  expect(vi.getTimerCount()).toBe(timers - 1);
-});
-
-it('shows the platform shortcut on the entry toggle', async () => {
-  await open();
-  expect(screen.getByRole('button', { name: 'Hide backlog' })).toHaveAttribute(
-    'title',
-    'Toggle backlog (Ctrl+T)',
-  );
-  cleanup();
-  const ua = vi
-    .spyOn(navigator, 'userAgent', 'get')
-    .mockReturnValue(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Electron/40.0.0',
-    );
-  onTestFinished(() => ua.mockRestore());
-  await open();
-  expect(screen.getByRole('button', { name: 'Hide backlog' })).toHaveAttribute(
-    'title',
-    'Toggle backlog (⌘T)',
-  );
-});
-
-it('starts with the entry panel closed when the saved layout collapsed it', async () => {
-  localStorage.setItem(
-    'react-resizable-panels:backlog',
-    JSON.stringify({ main: 100, backlog: 0 }),
-  );
-  await open();
-  expect(screen.getByRole('button', { name: 'Show backlog' })).toHaveAttribute(
-    'aria-expanded',
-    'false',
-  );
-});
-
-it('toggles the entry panel with Ctrl+T, even from the composer', async () => {
-  const user = await open();
-  const box = screen.getByPlaceholderText('Ask the agent…');
-  await user.click(box);
-  await user.keyboard('{Control>}t{/Control}');
-  expect(screen.getByRole('button', { name: 'Show backlog' })).toBeVisible();
-  expect(box).toHaveValue('');
-  await user.keyboard('{Meta>}t{/Meta}');
-  expect(screen.getByRole('button', { name: 'Hide backlog' })).toBeVisible();
-});
-
-it('lists done entries after open ones and says when there are none', async () => {
-  const { user } = await openWithBacklog([
-    { line: 1, text: 'next', done: false },
-    { line: 0, text: 'old', done: true },
-    { line: 2, text: 'later', done: false },
-  ]);
-  await user.click(screen.getByRole('button', { name: '[ DONE 1 ]' }));
-  expect(
-    screen.getAllByRole('checkbox').map((c) => c.getAttribute('aria-label')),
-  ).toEqual(['next', 'later', 'old']);
-  act(() => backlog.onChange.mock.lastCall![0]('/proj', []));
+  act(() => change('/proj', []));
   expect(screen.getByText('EMPTY')).toBeInTheDocument();
 });
 
-it('renames a entry inline', async () => {
+it('renames an entry inline', async () => {
   const ship = { line: 0, text: 'ship', done: false };
   const { user, edit } = await openWithBacklog([ship]);
   await user.dblClick(screen.getByText('ship'));
@@ -1810,6 +1471,81 @@ it('renames a entry inline', async () => {
     entry: ship,
     text: 'ship later',
   });
+});
+
+it('toggles the backlog panel from its icon, the separator lines and Ctrl+T', async () => {
+  const user = await open();
+  const toggle = screen.getByRole('button', { name: 'Hide backlog' });
+  expect(toggle.querySelector('svg.lucide')).not.toBeNull();
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(toggle).toHaveAttribute('title', 'Toggle backlog (Ctrl+T)');
+  await user.click(toggle);
+  expect(toggle).toHaveAccessibleName('Show backlog');
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  const line = toggle.parentElement!.firstElementChild!;
+  await user.click(line);
+  expect(toggle).toHaveAccessibleName('Hide backlog');
+  fireEvent.pointerDown(line, { clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(line, { clientX: 140, clientY: 100 });
+  fireEvent.pointerUp(line, { clientX: 140, clientY: 100 });
+  fireEvent.click(line, { clientX: 140, clientY: 100, detail: 1 });
+  expect(toggle).toHaveAccessibleName('Hide backlog');
+
+  const box = screen.getByPlaceholderText('Ask the agent…');
+  await user.click(box);
+  await user.keyboard('{Control>}t{/Control}');
+  expect(toggle).toHaveAccessibleName('Show backlog');
+  expect(box).toHaveValue('');
+  await user.keyboard('{Meta>}t{/Meta}');
+  expect(toggle).toHaveAccessibleName('Hide backlog');
+
+  cleanup();
+  const ua = vi
+    .spyOn(navigator, 'userAgent', 'get')
+    .mockReturnValue(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Electron/40.0.0',
+    );
+  onTestFinished(() => ua.mockRestore());
+  await open();
+  expect(screen.getByRole('button', { name: 'Hide backlog' })).toHaveAttribute(
+    'title',
+    'Toggle backlog (⌘T)',
+  );
+});
+
+it('starts with the backlog panel closed when the saved layout collapsed it', async () => {
+  localStorage.setItem(
+    'react-resizable-panels:backlog',
+    JSON.stringify({ main: 100, backlog: 0 }),
+  );
+  await open();
+  expect(screen.getByRole('button', { name: 'Show backlog' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+});
+
+it('keeps the panel snap animation running for the full duration after a second toggle', async () => {
+  await open();
+  vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const toggle = screen.getByRole('button', { name: 'Hide backlog' });
+  const snapping = () => document.querySelector('[data-snap]') !== null;
+  expect(snapping()).toBe(false);
+  fireEvent.click(toggle);
+  expect(snapping()).toBe(true);
+  act(() => vi.advanceTimersByTime(150));
+  fireEvent.click(toggle);
+  act(() => vi.advanceTimersByTime(150));
+  expect(snapping()).toBe(true);
+  act(() => vi.advanceTimersByTime(50));
+  expect(snapping()).toBe(false);
+  fireEvent.click(toggle);
+  const timers = vi.getTimerCount();
+  cleanup();
+  expect(vi.getTimerCount()).toBe(timers - 1);
 });
 
 it('reorders entries by dragging them within their group', async () => {
@@ -1859,29 +1595,22 @@ it('reorders entries by dragging them within their group', async () => {
   expect(edit).not.toHaveBeenCalled();
 });
 
-it('binds the drag end listeners once per drag', async () => {
-  await openWithBacklog([{ line: 0, text: 'ship', done: false }]);
-  const add = vi.spyOn(window, 'addEventListener');
-  onTestFinished(() => add.mockRestore());
-  const dataTransfer = transfer();
-  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
-  const zone = screen.getByText('[ + NEW THREAD ]');
-  fireEvent.dragOver(zone, { dataTransfer });
-  fireEvent.dragLeave(zone, { dataTransfer });
-  fireEvent.dragOver(zone, { dataTransfer });
-  fireEvent.dragEnd(entryRow('ship'), { dataTransfer });
-  expect(add.mock.calls.filter(([type]) => type === 'dragend')).toHaveLength(1);
-});
-
-it('ends the drag when its entry leaves the list mid-drag', async () => {
+it('binds one set of drag end listeners per drag and ends a drag whose entry vanished', async () => {
   await openWithBacklog([
     { line: 0, text: 'ship', done: false },
     { line: 1, text: 'docs', done: false },
   ]);
+  const add = vi.spyOn(window, 'addEventListener');
+  onTestFinished(() => add.mockRestore());
+  const dragEnds = () => add.mock.calls.filter(([type]) => type === 'dragend');
   const dataTransfer = transfer();
-  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
   const zone = () => screen.queryByText('[ + NEW THREAD ]');
+  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
   fireEvent.dragOver(zone()!, { dataTransfer });
+  fireEvent.dragLeave(zone()!, { dataTransfer });
+  fireEvent.dragOver(zone()!, { dataTransfer });
+  expect(dragEnds()).toHaveLength(1);
+
   act(() =>
     backlog.onChange.mock.lastCall![0]('/proj', [
       { line: 0, text: 'docs', done: false },
@@ -1890,215 +1619,81 @@ it('ends the drag when its entry leaves the list mid-drag', async () => {
   expect(zone()).toBeNull();
   fireEvent.dragStart(entryRow('docs'), { dataTransfer });
   expect(zone()).not.toHaveAttribute('data-over');
+  expect(dragEnds()).toHaveLength(2);
 });
 
-it('copies a entry dropped on the chat into the composer', async () => {
+it('copies an entry dropped on the chat into the composer, ignoring plain text', async () => {
   const { user, edit } = await openWithBacklog([
     { line: 0, text: 'ship', done: false },
   ]);
   const box = screen.getByPlaceholderText('Ask the agent…');
-  const dropShip = () => {
-    const dataTransfer = transfer();
-    fireEvent.dragStart(entryRow('ship'), { dataTransfer });
-    const handled = !fireEvent.drop(box, { dataTransfer });
-    fireEvent.dragEnd(entryRow('ship'), { dataTransfer });
-    return handled;
-  };
-  expect(dropShip()).toBe(true);
+  const target = () =>
+    screen.queryByText('[ + ADD TO PROMPT ]')?.parentElement ?? null;
+  const text = transfer({ 'text/plain': 'hello' });
+  expect(fireEvent.dragOver(box, { dataTransfer: text })).toBe(true);
+  expect(fireEvent.drop(box, { dataTransfer: text })).toBe(true);
+  expect(box).toHaveValue('');
+  expect(target()).toBeNull();
+
+  let dataTransfer = transfer();
+  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
+  expect(target()).toBeInTheDocument();
+  expect(target()).not.toHaveAttribute('data-over');
+  fireEvent.dragOver(box, { dataTransfer });
+  expect(target()).toHaveAttribute('data-over');
+  fireEvent.dragOver(screen.getByText('[ + NEW THREAD ]'), { dataTransfer });
+  expect(target()).not.toHaveAttribute('data-over');
+  fireEvent.dragOver(box, { dataTransfer });
+  expect(fireEvent.drop(box, { dataTransfer })).toBe(false);
+  fireEvent.dragEnd(entryRow('ship'), { dataTransfer });
+  expect(target()).toBeNull();
   expect(box).toHaveValue('ship');
   expect(box).toHaveFocus();
+
   await user.clear(box);
   await user.type(box, 'draft');
   box.blur();
-  dropShip();
+  dataTransfer = transfer();
+  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
+  fireEvent.drop(box, { dataTransfer });
+  fireEvent.dragEnd(entryRow('ship'), { dataTransfer });
   expect(box).toHaveValue('draft\nship');
   expect(box).toHaveFocus();
   expect(edit).not.toHaveBeenCalled();
   expect(screen.getByRole('checkbox', { name: 'ship' })).toBeInTheDocument();
 });
 
-it('ignores plain text dropped on the chat', async () => {
-  await open();
-  const box = screen.getByPlaceholderText('Ask the agent…');
-  const dataTransfer = transfer({ 'text/plain': 'hello' });
-  expect(fireEvent.dragOver(box, { dataTransfer })).toBe(true);
-  expect(fireEvent.drop(box, { dataTransfer })).toBe(true);
-  expect(box).toHaveValue('');
-});
-
-it('starts a new thread from a entry dropped on the new thread zone', async () => {
-  const { user } = await openWithBacklog([
-    { line: 0, text: 'ship', done: false },
-  ]);
+it('fills the empty draft, or starts a new thread, from an entry dropped on the new thread zone', async () => {
+  await openWithBacklog([{ line: 0, text: 'ship', done: false }]);
   const zone = () => screen.queryByText('[ + NEW THREAD ]');
+  const box =
+    screen.getByPlaceholderText<HTMLTextAreaElement>('Ask the agent…');
+  const dropOnZone = () => {
+    const dataTransfer = transfer();
+    fireEvent.dragStart(entryRow('ship'), { dataTransfer });
+    fireEvent.dragOver(zone()!, { dataTransfer });
+    expect(zone()).toHaveAttribute('data-over');
+    fireEvent.drop(zone()!, { dataTransfer });
+    expect(zone()).toBeNull();
+  };
   expect(zone()).toBeNull();
-  let dataTransfer = transfer();
+  const dataTransfer = transfer();
   fireEvent.dragStart(entryRow('ship'), { dataTransfer });
   expect(zone()).toBeInTheDocument();
   fireEvent.dragEnd(entryRow('ship'), { dataTransfer });
   expect(zone()).toBeNull();
 
-  await user.type(screen.getByPlaceholderText('Ask the agent…'), 'busy');
-  dataTransfer = transfer();
-  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
-  fireEvent.dragOver(zone()!, { dataTransfer });
-  expect(zone()).toHaveAttribute('data-over');
-  fireEvent.drop(zone()!, { dataTransfer });
-  expect(zone()).toBeNull();
-  expect(sidebarTitles()).toEqual(['New thread', 'New thread']);
-  const box =
-    screen.getByPlaceholderText<HTMLTextAreaElement>('Ask the agent…');
-  expect(box).toHaveValue('ship');
-  expect(box).toHaveFocus();
-  expect([box.selectionStart, box.selectionEnd]).toEqual([4, 4]);
-});
-
-it('fills the empty draft from a entry dropped on the new thread zone', async () => {
-  await openWithBacklog([{ line: 0, text: 'ship', done: false }]);
-  const dataTransfer = transfer();
-  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
-  fireEvent.drop(screen.getByText('[ + NEW THREAD ]'), { dataTransfer });
+  dropOnZone();
   expect(sidebarTitles()).toEqual(['New thread']);
-  const box =
-    screen.getByPlaceholderText<HTMLTextAreaElement>('Ask the agent…');
   expect(box).toHaveValue('ship');
   expect(box).toHaveFocus();
   expect([box.selectionStart, box.selectionEnd]).toEqual([4, 4]);
-});
 
-it('marks the chat as a drop target while a entry is dragged', async () => {
-  await openWithBacklog([{ line: 0, text: 'ship', done: false }]);
-  const target = () =>
-    screen.queryByText('[ + ADD TO PROMPT ]')?.parentElement ?? null;
-  expect(target()).toBeNull();
-  const dataTransfer = transfer();
-  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
-  expect(target()).toBeInTheDocument();
-  expect(target()).not.toHaveAttribute('data-over');
-  const box = screen.getByPlaceholderText('Ask the agent…');
-  fireEvent.dragOver(box, { dataTransfer });
-  expect(target()).toHaveAttribute('data-over');
-  fireEvent.dragOver(screen.getByText('[ + NEW THREAD ]'), { dataTransfer });
-  expect(target()).not.toHaveAttribute('data-over');
-  fireEvent.dragOver(box, { dataTransfer });
-  fireEvent.drop(box, { dataTransfer });
-  expect(target()).toBeNull();
-  expect(box).toHaveValue('ship');
-});
-
-it('opens a new thread, a workspace and settings from the keyboard', async () => {
-  agent.listThreads.mockResolvedValue(list);
-  agent.usage.mockResolvedValue(null);
-  const user = await open();
-  await user.keyboard('{Control>}n{/Control}');
-  expect(heading()).toBe('New thread');
-  await user.keyboard('{Control>}o{/Control}');
-  expect(agent.pickWorkspace).toHaveBeenCalledTimes(2);
-  await user.keyboard('{Control>},{/Control}');
-  expect(screen.getByRole('dialog', { name: 'Settings' })).toBeVisible();
-});
-
-it('keeps focus in place when Tab is pressed', async () => {
-  const user = await open();
-  const box = screen.getByPlaceholderText('Ask the agent…');
-  await user.click(box);
-  await user.tab();
-  expect(box).toHaveFocus();
-  await user.tab({ shift: true });
-  expect(box).toHaveFocus();
-});
-
-it('cycles active threads with Ctrl+Tab, or all of them when chosen', async () => {
-  agent.listThreads.mockResolvedValue([
-    ...list,
-    { id: 'c', title: 'Oldest', createdAt: now - 3, updatedAt: now - 3 },
-  ]);
-  agent.usage.mockResolvedValue(null);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: /Oldest/ }));
-  await sendPrompt(user, 'go');
-  await user.click(screen.getByRole('button', { name: /Newest/ }));
-
-  await user.keyboard('{Control>}{Tab}{/Control}');
-  expect(heading()).toBe('Oldest');
-  await user.keyboard('{Control>}{Tab}{/Control}');
-  expect(heading()).toBe('Newest');
-  await user.keyboard('{Control>}{Shift>}{Tab}{/Shift}{/Control}');
-  expect(heading()).toBe('Oldest');
-
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
-  await user.click(screen.getByRole('button', { name: 'Hotkeys' }));
-  await user.click(screen.getByRole('radio', { name: 'all' }));
-  await user.keyboard('{Escape}');
-  await user.keyboard('{Control>}{Shift>}{Tab}{/Shift}{/Control}');
-  expect(heading()).toBe('Older');
-});
-
-it('offers an update from settings when one is available', async () => {
-  agent.usage.mockResolvedValue(null);
-  update.check.mockResolvedValue({
-    commits: ['Settings page', 'Faster entries'],
-  });
-  const user = await open();
-  expect(await screen.findByTitle('Update available')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
-  await user.click(screen.getByRole('button', { name: 'Update' }));
-  expect(screen.getByText('Faster entries')).toBeInTheDocument();
-  await user.click(
-    screen.getByRole('button', { name: '[ UPDATE AND RESTART ]' }),
-  );
-  expect(update.install).toHaveBeenCalledWith(expect.any(String));
-  expect(screen.getByRole('button', { name: '[ UPDATING ]' })).toBeDisabled();
-});
-
-it('shows why an update could not be pulled and lets it be retried', async () => {
-  agent.usage.mockResolvedValue(null);
-  update.check.mockResolvedValue({ commits: ['Faster todos'] });
-  update.install.mockResolvedValue('fatal: Not possible to fast-forward');
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
-  await user.click(screen.getByRole('button', { name: 'Update' }));
-  await user.click(
-    screen.getByRole('button', { name: '[ UPDATE AND RESTART ]' }),
-  );
-  expect(await screen.findByRole('alert')).toHaveTextContent(
-    'Not possible to fast-forward',
-  );
-  expect(
-    screen.getByRole('button', { name: '[ UPDATE AND RESTART ]' }),
-  ).toBeEnabled();
-});
-
-it('reports an update that failed to install on the last restart', async () => {
-  agent.usage.mockResolvedValue(null);
-  update.check.mockResolvedValue({
-    commits: ['Faster todos'],
-    error: 'Update failed, see /tmp/zephyr-update.log',
-  });
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
-  await user.click(screen.getByRole('button', { name: 'Update' }));
-  expect(screen.getByRole('alert')).toHaveTextContent('Update failed');
-});
-
-it('hides the update tab when up to date', async () => {
-  agent.usage.mockResolvedValue(null);
-  const user = await open();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
-  expect(screen.queryByTitle('Update available')).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Update' })).toBeNull();
-});
-
-it('picks up skills added while the app is open', async () => {
-  agent.pickWorkspace.mockResolvedValue('/skills');
-  const user = await open();
-  agent.catalog.mockResolvedValue({
-    commands: [{ name: 'deslop', description: 'Clean up', argumentHint: '' }],
-    models: [],
-  });
-  act(() => catalogListener('/skills'));
-  await user.type(screen.getByPlaceholderText('Ask the agent…'), '/');
-  expect(
-    await screen.findByRole('option', { name: /deslop/ }),
-  ).toBeInTheDocument();
+  dropOnZone();
+  expect(sidebarTitles()).toEqual(['New thread', 'New thread']);
+  const fresh =
+    screen.getByPlaceholderText<HTMLTextAreaElement>('Ask the agent…');
+  expect(fresh).toHaveValue('ship');
+  expect(fresh).toHaveFocus();
+  expect([fresh.selectionStart, fresh.selectionEnd]).toEqual([4, 4]);
 });

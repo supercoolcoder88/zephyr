@@ -42,7 +42,7 @@
     "@vitejs/plugin-react": "^6.2.1",
     "electron": "45.2.3",
     "jsdom": "^31.0.0",
-    "oxfmt": "^0.41.0",
+    "oxfmt": "^0.77.0",
     "oxlint": "^1.92.0",
     "tailwindcss": "^4.3.5",
     "typescript": "^6.0.3",
@@ -61,5 +61,14 @@
     "rehype-highlight": "^7.0.2",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1"
+  },
+  "overrides": {
+    "@electron/asar@4": {
+      "glob": "^14.0.2",
+      "minimatch": "^11.0.1"
+    }
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.4": true
   }
 }
