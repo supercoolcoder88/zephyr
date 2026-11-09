@@ -5,10 +5,19 @@ import {
   ipcMain,
   type WebContents,
 } from 'electron';
-import { watch } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { existsSync, watch } from 'node:fs';
+import {
+  cp,
+  mkdir,
+  readdir,
+  readFile,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type {
   Options,
   Query,
@@ -32,6 +41,35 @@ import type {
 // The SDK is ESM-only and spawns a native Claude Code binary, so it stays
 // external to the Vite bundle and is loaded lazily on first use.
 const loadSdk = () => import('@anthropic-ai/claude-agent-sdk');
+
+const git = (cwd: string, ...args: string[]) =>
+  promisify(execFile)('git', ['-C', cwd, ...args]).then(
+    (r) => r.stdout.trim(),
+    (err) => {
+      throw new Error(
+        `${err.stdout ?? ''}${err.stderr ?? ''}`.trim() || err.message,
+      );
+    },
+  );
+const worktrees = (cwd: string) => path.join(cwd, '.zephyr', 'worktrees');
+
+// The install for the first lockfile found; Go and Rust share a global cache, so theirs only prefetch.
+const lockfiles = [
+  ['pnpm-lock.yaml', 'pnpm install --frozen-lockfile'],
+  ['bun.lock', 'bun install --frozen-lockfile'],
+  ['bun.lockb', 'bun install --frozen-lockfile'],
+  ['yarn.lock', 'yarn install --frozen-lockfile'],
+  ['package-lock.json', 'npm ci'],
+  ['uv.lock', 'uv sync --frozen'],
+  ['poetry.lock', 'poetry install'],
+  ['Pipfile.lock', 'pipenv sync'],
+  ['Gemfile.lock', 'bundle install'],
+  ['composer.lock', 'composer install'],
+  ['Cargo.lock', 'cargo fetch'],
+  ['go.sum', 'go mod download'],
+];
+const setupCommand = (cwd: string) =>
+  lockfiles.find(([file]) => existsSync(path.join(cwd, file)))?.[1];
 
 // In a packaged app the SDK's own lookup resolves the binary inside app.asar,
 // where it can't run; forge.config.mts unpacks it next to the archive.
@@ -616,6 +654,80 @@ export function registerAgentIpc() {
     return filePaths[0];
   });
 
+  ipcMain.handle('git:branch', (_, cwd: string) =>
+    git(cwd, 'branch', '--show-current').then(
+      (b) => b || 'HEAD',
+      () => null,
+    ),
+  );
+
+  ipcMain.handle('git:setup', (_, cwd: string) => setupCommand(cwd) ?? null);
+
+  ipcMain.handle(
+    'git:worktree',
+    async (_, cwd: string, name: string, setup?: string) => {
+      const dir = worktrees(cwd);
+      // Ignores itself so worktrees stay out of git even when .zephyr is committed.
+      if (await mkdir(dir, { recursive: true }))
+        await writeFile(path.join(dir, '.gitignore'), '*\n');
+      const branch = `zephyr/${name}`;
+      const tree = path.join(dir, name);
+      await git(cwd, 'worktree', 'add', '-b', branch, tree);
+      // Ignored env files don't come with a checkout.
+      for (const f of await readdir(cwd))
+        if (f.startsWith('.env'))
+          await cp(path.join(cwd, f), path.join(tree, f), {
+            recursive: true,
+            force: false,
+          });
+      // Installs the worktree's own dependencies; a failure is reported, not fatal.
+      const command = setup || setupCommand(cwd);
+      if (!command) return { path: tree, branch };
+      const ran = await promisify(execFile)(
+        process.env.SHELL ?? '/bin/sh',
+        ['-lc', command],
+        { cwd: tree, maxBuffer: 64 * 1024 * 1024 },
+      ).then(
+        () => ({ ok: true, output: '' }),
+        (err) => ({
+          ok: false,
+          output:
+            `${err.stdout ?? ''}${err.stderr ?? ''}`
+              .trim()
+              .split('\n')
+              .slice(-20)
+              .join('\n') || err.message,
+        }),
+      );
+      return { path: tree, branch, setup: { command, ...ran } };
+    },
+  );
+
+  // Squashes the worktree's work, committed or not, onto the workspace's branch, then removes it.
+  ipcMain.handle(
+    'git:merge',
+    async (_, cwd: string, worktree: string, message: string) => {
+      if (!worktree.startsWith(worktrees(cwd) + path.sep))
+        throw new Error('Only worktrees Zephyr created can be merged');
+      const staged = () => git(cwd, 'diff', '--cached', '--name-only');
+      if (await staged())
+        throw new Error(
+          'Commit or unstage the staged changes on your branch first',
+        );
+      const branch = await git(worktree, 'branch', '--show-current');
+      await git(worktree, 'add', '-A');
+      if (await git(worktree, 'diff', '--cached', '--name-only'))
+        await git(worktree, 'commit', '-m', message);
+      await git(cwd, 'merge', '--squash', branch).catch(async (err) => {
+        await git(cwd, 'reset', '--merge').catch(() => undefined);
+        throw err;
+      });
+      if (await staged()) await git(cwd, 'commit', '-m', message);
+      await git(cwd, 'worktree', 'remove', worktree);
+      await git(cwd, 'branch', '-D', branch);
+    },
+  );
+
   ipcMain.handle(
     'workspace:paths',
     async (_, cwd: string, candidates: string[]) => {
@@ -682,6 +794,8 @@ export function registerAgentIpc() {
           .slice(0, 48),
         createdAt: s.createdAt ?? s.lastModified,
         updatedAt: s.lastModified,
+        // Sessions of the repo's git worktrees are listed with the workspace.
+        ...(s.cwd && s.cwd !== cwd && { worktree: s.cwd, branch: s.gitBranch }),
       }));
   });
 
@@ -751,14 +865,22 @@ export function registerAgentIpc() {
 
   ipcMain.handle(
     'threads:delete',
-    async (_, sessionId: string, cwd: string) => {
+    async (_, sessionId: string, cwd: string, worktree?: string) => {
       const { deleteSession } = await loadSdk();
+      // Only Zephyr's own worktrees are removed; their branch is kept so no commits are lost.
+      if (
+        worktree?.startsWith(worktrees(cwd) + path.sep) &&
+        existsSync(worktree)
+      )
+        await git(cwd, 'worktree', 'remove', worktree);
       // Already gone (or a retry after a partial delete) counts as deleted.
-      await deleteSession(sessionId, { dir: cwd }).catch((err: unknown) => {
-        if (!(err instanceof Error && /not found/i.test(err.message))) {
-          throw err;
-        }
-      });
+      await deleteSession(sessionId, { dir: worktree ?? cwd }).catch(
+        (err: unknown) => {
+          if (!(err instanceof Error && /not found/i.test(err.message))) {
+            throw err;
+          }
+        },
+      );
     },
   );
 

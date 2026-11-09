@@ -32,6 +32,7 @@
 
   /* Composer references follow the theme's code palette. */
   --color-command: var(--color-code-purple);
+  --color-unmerged: var(--color-code-purple);
   --color-file: var(--color-code-green);
   --color-folder: var(--color-code-yellow);
 

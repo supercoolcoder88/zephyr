@@ -24,6 +24,8 @@ interface Props {
   onSend(prompt: string, images: Image[], choice: ModelChoice): void;
   onCancel(): void;
   onPrompt(text: string): void;
+  onIsolate(isolated: boolean): void;
+  onMerge(): void;
   onImages(update: (images: Image[]) => Image[]): void;
   onAnswer(id: string, allow: boolean, answers?: Record<string, string>): void;
   composer: RefObject<HTMLTextAreaElement | null>;
@@ -36,6 +38,8 @@ export default function ChatThread({
   onSend,
   onCancel,
   onPrompt,
+  onIsolate,
+  onMerge,
   onImages,
   onAnswer,
   composer,
@@ -289,7 +293,11 @@ export default function ChatThread({
       )}
 
       <Composer
-        cwd={thread.cwd}
+        cwd={thread.worktree ?? thread.cwd}
+        isolated={!!thread.isolated}
+        locked={!thread.draft || items.length > 0}
+        onIsolate={onIsolate}
+        onMerge={thread.worktree && !running ? onMerge : undefined}
         running={running}
         history={[...items, ...(thread.queued ?? [])].flatMap((i) =>
           i.type === 'user' && i.text ? [i.text] : [],

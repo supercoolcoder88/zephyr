@@ -24,13 +24,14 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 | `ok`          | `#00E676`   | Thread status dot: finished, unseen              |
 | `warn`        | `#FF9100`   | Needs-attention dot; the user's question answers |
 | `draft`       | `#FFD600`   | Thread status dot: unsent draft with text        |
+| `unmerged`    | code-purple | Thread status dot: idle worktree not yet merged  |
 | `command`     | code-purple | Valid slash command in the composer              |
 | `file`        | code-green  | Existing file path in the composer               |
 | `folder`      | code-yellow | Existing folder path in the composer             |
 
 - Light (`<html data-theme="light">`) and cyber (`data-theme="cyber"`, dark navy with white text) modes redefine these tokens in `src/index.css`; components never branch on theme.
 - `warn` also marks the user's own answers in an answered question box (chosen option labels and typed "Other" text).
-- Otherwise thread and subthread status dots are the only place `ok`, `warn` and `draft` appear: cyan running, `alert` error, `ok` done, `warn` needs attention, `draft` unsent draft with text, `mute` read.
+- Otherwise thread and subthread status dots are the only place `ok`, `warn`, `draft` and `unmerged` appear: cyan running, `alert` error, `ok` done, `warn` needs attention, `draft` unsent draft with text, `unmerged` a seen worktree thread waiting to be merged, `mute` read.
 - `command`, `file` and `folder` colour only the matching text in the composer, so the user can see a command or path resolved before sending.
 - Emphasis is done by **inversion** (`bg-paper text-void`), not by adding colour.
 - Never set long text in cyan. Cyan marks things like rules, outlines, cursors and short status words.

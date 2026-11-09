@@ -92,6 +92,10 @@ const agent = {
   paths: vi.fn(),
   setPermission: vi.fn(),
   answerPermission: vi.fn(),
+  branch: vi.fn(),
+  createWorktree: vi.fn(),
+  mergeWorktree: vi.fn(),
+  setupCommand: vi.fn(),
 };
 let catalogListener: (cwd: string) => void;
 const update = { check: vi.fn(), install: vi.fn() };
@@ -108,6 +112,8 @@ beforeEach(() => {
   agent.loadThread.mockResolvedValue([]);
   agent.deleteThread.mockResolvedValue(undefined);
   agent.paths.mockResolvedValue({});
+  agent.branch.mockResolvedValue('main');
+  agent.setupCommand.mockResolvedValue(null);
   agent.catalog.mockResolvedValue({
     commands: [
       { name: 'compact', description: 'Summarize', argumentHint: '' },
@@ -456,7 +462,7 @@ it('deletes threads after confirmation, moving to the next one or a fresh draft'
   expect(agent.deleteThread).not.toHaveBeenCalled();
 
   await remove(user, /Older/);
-  expect(agent.deleteThread).toHaveBeenCalledWith('a', '/proj');
+  expect(agent.deleteThread).toHaveBeenCalledWith('a', '/proj', undefined);
   expect(sidebarTitles()).toEqual(['Newest', 'Oldest']);
   expect(heading()).toBe('Newest');
 
@@ -492,7 +498,7 @@ it('hides delete on the running thread and closes the live session of a deleted 
   expect(agent.close).not.toHaveBeenCalled();
   await remove(user, /Newest/);
   expect(agent.close).toHaveBeenCalledWith(runId);
-  expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj');
+  expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj', undefined);
 });
 
 it('runs threads concurrently and routes events by run', async () => {
@@ -559,7 +565,7 @@ it('keeps threads in creation order and clears outcomes once seen', async () => 
   expect(state(/Older/)).toBe('read');
 });
 
-it('archives threads untouched since before today', async () => {
+it('archives threads untouched since before today, except unmerged worktrees', async () => {
   const day = 86_400_000;
   agent.listThreads.mockResolvedValue([
     { id: 't', title: 'Today', createdAt: now - 2 * day, updatedAt: now - 1 },
@@ -570,13 +576,21 @@ it('archives threads untouched since before today', async () => {
       createdAt: now - 3 * day,
       updatedAt: now - 3 * day,
     },
+    {
+      id: 'w',
+      title: 'Old worktree',
+      createdAt: now - 4 * day,
+      updatedAt: now - 4 * day,
+      worktree: '/proj/.zephyr/worktrees/w',
+    },
   ]);
   const user = await open();
-  expect(sidebarTitles()).toEqual(['Today', '[ ARCHIVED 2 ]']);
+  expect(sidebarTitles()).toEqual(['Today', 'Old worktree', '[ ARCHIVED 2 ]']);
 
   await user.click(screen.getByRole('button', { name: '[ ARCHIVED 2 ]' }));
   expect(sidebarTitles()).toEqual([
     'Today',
+    'Old worktree',
     '[ HIDE ARCHIVED ]',
     'Yesterday',
     'Old',
@@ -1696,4 +1710,113 @@ it('fills the empty draft, or starts a new thread, from an entry dropped on the 
   expect(fresh).toHaveValue('ship');
   expect(fresh).toHaveFocus();
   expect([fresh.selectionStart, fresh.selectionEnd]).toEqual([4, 4]);
+});
+
+it('runs a thread on the current branch, or in a new worktree picked before its first message', async () => {
+  const tree = '/proj/.zephyr/worktrees/abc';
+  agent.branch.mockImplementation(async (cwd: string) =>
+    cwd === tree ? 'zephyr/abc' : 'main',
+  );
+  agent.createWorktree.mockResolvedValue({
+    path: tree,
+    branch: 'zephyr/abc',
+    setup: { command: 'make deps', ok: false, output: 'no make' },
+  });
+  localStorage.setItem('setup', JSON.stringify({ '/proj': 'make deps' }));
+  const user = await open();
+  await sendPrompt(user, 'on main');
+  expect(agent.send.mock.lastCall![3]).toBe('/proj');
+  expect(screen.queryByRole('button', { name: 'main' })).toBeNull();
+  expect(screen.getByText('main')).toBeInTheDocument();
+  await finish();
+
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.click(await screen.findByRole('button', { name: 'main' }));
+  await user.click(screen.getByRole('menuitemradio', { name: 'New worktree' }));
+  expect(screen.queryByRole('menu')).toBeNull();
+  await sendPrompt(user, 'isolated');
+  expect(agent.createWorktree).toHaveBeenCalledWith(
+    '/proj',
+    expect.any(String),
+    'make deps',
+  );
+  expect(agent.send.mock.lastCall![3]).toBe(tree);
+  expect(await screen.findByText(/Setup failed\s+no make/)).toBeInTheDocument();
+  expect(await screen.findByText('zephyr/abc')).toBeInTheDocument();
+  expect(screen.getByRole('img', { name: 'zephyr/abc' })).toBeInTheDocument();
+
+  act(() => emit({ type: 'session', sessionId: 'wt' }));
+  agent.listThreads.mockResolvedValue([
+    {
+      id: 'wt',
+      title: 'isolated',
+      createdAt: now,
+      updatedAt: now,
+      worktree: tree,
+      branch: 'zephyr/abc',
+    },
+  ]);
+  await finish();
+  await sendPrompt(user, 'again');
+  expect(agent.createWorktree).toHaveBeenCalledTimes(1);
+  expect(agent.send.mock.lastCall!.slice(3, 5)).toEqual([tree, 'wt']);
+});
+
+it('lists worktree sessions with the workspace, loading and deleting them in their worktree', async () => {
+  const tree = '/proj/.zephyr/worktrees/x';
+  agent.listThreads.mockResolvedValue([
+    { ...list[0], worktree: tree, branch: 'zephyr/x' },
+    list[1],
+  ]);
+  const user = await open();
+  expect(screen.getByRole('img', { name: 'zephyr/x' })).toBeInTheDocument();
+  expect(row(/Newest/).getByLabelText('unmerged')).toBeInTheDocument();
+  expect(row(/Older/).getByLabelText('read')).toBeInTheDocument();
+  expect(agent.loadThread).toHaveBeenCalledWith('b', tree);
+  await remove(user, /Newest/);
+  expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj', tree);
+});
+
+it('merges an idle worktree thread from its branch label, keeping it when the merge fails', async () => {
+  const tree = '/proj/.zephyr/worktrees/x';
+  agent.branch.mockImplementation(async (cwd: string) =>
+    cwd === tree ? 'zephyr/x' : 'main',
+  );
+  agent.listThreads.mockResolvedValue([
+    { ...list[0], worktree: tree, branch: 'zephyr/x' },
+    list[1],
+  ]);
+  agent.mergeWorktree.mockRejectedValueOnce(new Error('CONFLICT (content)'));
+  const user = await open();
+  await user.click(
+    await screen.findByRole('button', { name: 'Merge zephyr/x' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Confirm merge' }));
+  expect(agent.mergeWorktree).toHaveBeenCalledWith('/proj', tree, 'Newest');
+  expect(await screen.findByText('CONFLICT (content)')).toBeInTheDocument();
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
+
+  await user.click(screen.getByRole('button', { name: 'Merge zephyr/x' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm merge' }));
+  expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj', tree);
+  expect(sidebarTitles()).toEqual(['Older']);
+  expect(screen.queryByRole('button', { name: /^Merge/ })).toBeNull();
+});
+
+it("suggests the workspace's lockfile install as worktree setup and saves an override per workspace", async () => {
+  agent.setupCommand.mockResolvedValue('npm ci');
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Workspace' }));
+  const field = screen.getByRole('textbox', { name: 'Worktree setup' });
+  expect(agent.setupCommand).toHaveBeenCalledWith('/proj');
+  await vi.waitFor(() =>
+    expect(field).toHaveAttribute('placeholder', 'npm ci'),
+  );
+  await user.type(field, 'pnpm i');
+  expect(JSON.parse(localStorage.getItem('setup')!)).toEqual({
+    '/proj': 'pnpm i',
+  });
+  await user.clear(field);
+  expect(JSON.parse(localStorage.getItem('setup')!)).toEqual({});
 });

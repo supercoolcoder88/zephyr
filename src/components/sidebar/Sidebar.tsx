@@ -1,4 +1,10 @@
-import { ArrowDown, ArrowUp, Settings as SettingsIcon, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  GitBranch,
+  Settings as SettingsIcon,
+  X,
+} from 'lucide-react';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { Permission, UpdateStatus } from '../../agent-types';
 import { stateDot, threadState, type Thread } from '../../thread';
@@ -114,6 +120,18 @@ export default function Sidebar({
             className={`size-1.5 shrink-0 ${stateDot[threadState(thread, runningIds)]}`}
           />
           <span className="flex-1 truncate">{thread.title}</span>
+          {thread.worktree && (
+            <span
+              title={thread.branch}
+              className={`shrink-0 ${active ? 'text-void/50' : 'text-mute'}`}
+            >
+              <GitBranch
+                {...icon}
+                role="img"
+                aria-label={thread.branch ?? 'Worktree'}
+              />
+            </span>
+          )}
         </button>
         {!runningIds.includes(thread.id) && (
           <span

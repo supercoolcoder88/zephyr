@@ -137,13 +137,40 @@ export interface AgentApi {
   // Null when plan rate limits don't apply, e.g. API key auth.
   usage(): Promise<UsageWindow[] | null>;
   onEvent(listener: (runId: string, event: AgentEvent) => void): () => void;
-  listThreads(
-    cwd: string,
-  ): Promise<
-    { id: string; title: string; createdAt: number; updatedAt: number }[]
+  listThreads(cwd: string): Promise<
+    {
+      id: string;
+      title: string;
+      createdAt: number;
+      updatedAt: number;
+      worktree?: string;
+      branch?: string;
+    }[]
   >;
   loadThread(sessionId: string, cwd: string): Promise<ThreadItem[]>;
-  deleteThread(sessionId: string, cwd: string): Promise<void>;
+  // Also removes the thread's worktree when Zephyr created it.
+  deleteThread(
+    sessionId: string,
+    cwd: string,
+    worktree?: string,
+  ): Promise<void>;
+  // Null outside a git repo.
+  branch(cwd: string): Promise<string | null>;
+  // A new worktree and branch for one thread, off the workspace's current HEAD,
+  // set up with the given command or the one detected from its lockfile.
+  createWorktree(
+    cwd: string,
+    name: string,
+    setup?: string,
+  ): Promise<{
+    path: string;
+    branch: string;
+    setup?: { command: string; ok: boolean; output: string };
+  }>;
+  // The setup command detected from the workspace's lockfile.
+  setupCommand(cwd: string): Promise<string | null>;
+  // Squash merges the worktree into the workspace's branch, then removes the worktree and its branch.
+  mergeWorktree(cwd: string, worktree: string, message: string): Promise<void>;
 }
 
 // A `- [ ]` line of the project's .zephyr/backlog.md; line is its 0-based index there.

@@ -11,6 +11,7 @@ export type ThreadState =
   | 'done'
   | 'running'
   | 'draft'
+  | 'unmerged'
   | 'read';
 
 export const stateDot: Record<ThreadState, string> = {
@@ -19,6 +20,7 @@ export const stateDot: Record<ThreadState, string> = {
   done: 'bg-ok',
   running: 'animate-pulse bg-cyan',
   draft: 'bg-draft',
+  unmerged: 'bg-unmerged',
   read: 'bg-mute',
 };
 
@@ -47,6 +49,11 @@ export interface Thread {
   context?: number;
   // Original draft id, kept as the React key so promotion doesn't remount.
   key?: string;
+  // A draft that gets its own worktree when its first message is sent.
+  isolated?: true;
+  // The thread's git worktree folder and branch, when it runs in one.
+  worktree?: string;
+  branch?: string;
 }
 
 export function threadState(thread: Thread, runningIds: string[]): ThreadState {
@@ -54,7 +61,8 @@ export function threadState(thread: Thread, runningIds: string[]): ThreadState {
   if (runningIds.includes(thread.id)) return 'running';
   if (thread.draft && (thread.prompt?.trim() || thread.images?.length))
     return 'draft';
-  return thread.status ?? 'read';
+  // Merging removes the worktree, so any thread still in one is unmerged.
+  return thread.status ?? (thread.worktree ? 'unmerged' : 'read');
 }
 
 export function newThread(cwd: string): Thread {
@@ -72,7 +80,8 @@ export function newThread(cwd: string): Thread {
 // Manual archive choices by session id; true archives, a timestamp unarchives and lists it from then.
 export type ArchiveChoices = Record<string, true | number>;
 
-// Read threads untouched since before today are archived unless chosen by hand.
+// Read threads untouched since before today are archived unless chosen by hand;
+// unmerged ones only by hand.
 export function listThreads(
   threads: Thread[],
   choices: ArchiveChoices,
@@ -80,14 +89,13 @@ export function listThreads(
   runningIds: string[],
 ) {
   const today = new Date().setHours(0, 0, 0, 0);
-  const archived = threads.filter(
-    (t) =>
-      !t.draft &&
-      threadState(t, runningIds) === 'read' &&
-      (t.id in choices
-        ? choices[t.id] === true
-        : t.updatedAt < today && t.id !== activeId),
-  );
+  const archived = threads.filter((t) => {
+    const state = threadState(t, runningIds);
+    if (t.draft || (state !== 'read' && state !== 'unmerged')) return false;
+    return t.id in choices
+      ? choices[t.id] === true
+      : state === 'read' && t.updatedAt < today && t.id !== activeId;
+  });
   const listedAt = (t: Thread) =>
     Math.max(t.createdAt, Number(choices[t.id] ?? 0));
   const current = threads

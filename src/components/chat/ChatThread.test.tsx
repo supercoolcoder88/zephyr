@@ -20,6 +20,7 @@ beforeEach(() => {
     catalog: async () => ({ commands: [], models: [] }),
     paths: async () => ({}),
     onCatalogChange: () => () => undefined,
+    branch: async () => null,
   } as unknown as typeof window.agent;
 });
 
@@ -58,6 +59,8 @@ const view = (
     onSend={() => undefined}
     onCancel={() => undefined}
     onPrompt={() => undefined}
+    onIsolate={() => undefined}
+    onMerge={() => undefined}
     onImages={() => undefined}
     onAnswer={() => undefined}
     composer={{ current: null }}
@@ -157,6 +160,8 @@ const renderQuote = () => {
       onSend={() => undefined}
       onCancel={() => undefined}
       onPrompt={onPrompt}
+      onIsolate={() => undefined}
+      onMerge={() => undefined}
       onImages={() => undefined}
       onAnswer={() => undefined}
       composer={composer}
@@ -170,8 +175,7 @@ const select = (from: Node, to = from) => {
   fireEvent.mouseUp(from);
 };
 
-const copyButton = () =>
-  screen.queryByRole('button', { name: 'Copy to chat' });
+const copyButton = () => screen.queryByRole('button', { name: 'Copy to chat' });
 
 it('copies transcript selections into the composer as quotes', async () => {
   const { onPrompt, composer } = renderQuote();
@@ -238,6 +242,8 @@ it('shows a prompt set from outside without remounting', () => {
     onSend: () => undefined,
     onCancel: () => undefined,
     onPrompt: () => undefined,
+    onIsolate: () => undefined,
+    onMerge: () => undefined,
     onImages: () => undefined,
     onAnswer: () => undefined,
     composer: { current: null },

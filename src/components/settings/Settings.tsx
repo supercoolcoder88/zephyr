@@ -12,7 +12,14 @@ interface Props {
   onClose(): void;
 }
 
-const sections = ['Appearance', 'Agent', 'Usage', 'Hotkeys', 'Update'] as const;
+const sections = [
+  'Appearance',
+  'Agent',
+  'Workspace',
+  'Usage',
+  'Hotkeys',
+  'Update',
+] as const;
 
 const themes = ['dark', 'cyber', 'light'];
 
@@ -96,6 +103,10 @@ export default function Settings({
     useState<(typeof sections)[number]>('Appearance');
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
   const [cycle, setCycle] = useState(localStorage.getItem('cycle') ?? 'active');
+  const [setups, setSetups] = useState<Record<string, string>>(() =>
+    JSON.parse(localStorage.getItem('setup') ?? '{}'),
+  );
+  const [detected, setDetected] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState(update.error);
   const [usage, setUsage] = useState<
@@ -126,6 +137,10 @@ export default function Settings({
       () => setUsage('error'),
     );
   }, [section]);
+
+  useEffect(() => {
+    window.agent.setupCommand(workspace).then(setDetected, () => undefined);
+  }, [workspace]);
 
   function pickTheme(next: string) {
     document.documentElement.dataset.theme = next;
@@ -209,6 +224,25 @@ export default function Settings({
                   </button>
                 ))}
               </div>
+            )}
+            {section === 'Workspace' && (
+              <Row
+                name="Worktree setup"
+                hint="Runs in each new worktree. Empty uses the lockfile's install."
+              >
+                <input
+                  aria-label="Worktree setup"
+                  value={setups[workspace] ?? ''}
+                  placeholder={detected ?? 'None'}
+                  onChange={(e) => {
+                    const next = { ...setups, [workspace]: e.target.value };
+                    if (!e.target.value) delete next[workspace];
+                    localStorage.setItem('setup', JSON.stringify(next));
+                    setSetups(next);
+                  }}
+                  className="w-64 border border-line bg-transparent px-3 py-1 text-sm outline-none placeholder:text-mute focus:border-line-strong"
+                />
+              </Row>
             )}
             {section === 'Usage' &&
               (usage === undefined || usage === 'loading' ? (

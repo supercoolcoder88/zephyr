@@ -38,8 +38,14 @@ const agent: AgentApi = {
   listThreads: (cwd) => ipcRenderer.invoke('threads:list', cwd),
   loadThread: (sessionId, cwd) =>
     ipcRenderer.invoke('threads:load', sessionId, cwd),
-  deleteThread: (sessionId, cwd) =>
-    ipcRenderer.invoke('threads:delete', sessionId, cwd),
+  deleteThread: (sessionId, cwd, worktree) =>
+    ipcRenderer.invoke('threads:delete', sessionId, cwd, worktree),
+  branch: (cwd) => ipcRenderer.invoke('git:branch', cwd),
+  createWorktree: (cwd, name, setup) =>
+    ipcRenderer.invoke('git:worktree', cwd, name, setup),
+  setupCommand: (cwd) => ipcRenderer.invoke('git:setup', cwd),
+  mergeWorktree: (cwd, worktree, message) =>
+    ipcRenderer.invoke('git:merge', cwd, worktree, message),
   onEvent: (listener) => {
     const handler = (_: IpcRendererEvent, runId: string, event: AgentEvent) =>
       listener(runId, event);

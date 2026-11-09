@@ -175,6 +175,121 @@ it('deletes a session, treating a missing one as deleted', async () => {
   await expect(invoke('threads:delete', 'sid', '/proj')).rejects.toBe(error);
 });
 
+it('gives a thread its own ignored worktree and removes it on delete, keeping the branch', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const repo = await mkdtemp(path.join(tmpdir(), 'zephyr-git-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  git(
+    '-c',
+    'user.name=t',
+    '-c',
+    'user.email=t@t',
+    'commit',
+    '-q',
+    '--allow-empty',
+    '-m',
+    'init',
+  );
+  expect(await invoke('git:branch', repo)).toBe('main');
+  expect(await invoke('git:branch', tmpdir())).toBeNull();
+
+  const tree = path.join(repo, '.zephyr', 'worktrees', 'abc');
+  expect(await invoke('git:worktree', repo, 'abc')).toEqual({
+    path: tree,
+    branch: 'zephyr/abc',
+  });
+  expect(await invoke('git:branch', tree)).toBe('zephyr/abc');
+  expect(git('status', '--porcelain')).toBe('');
+
+  await writeFile(path.join(tree, 'wip.txt'), 'x');
+  await expect(invoke('threads:delete', 'sid', repo, tree)).rejects.toThrow(
+    /untracked/,
+  );
+  expect(sdk.deleteSession).not.toHaveBeenCalled();
+  git('-C', tree, 'add', '.');
+  git(
+    '-C',
+    tree,
+    '-c',
+    'user.name=t',
+    '-c',
+    'user.email=t@t',
+    'commit',
+    '-q',
+    '-m',
+    'wip',
+  );
+  sdk.deleteSession.mockResolvedValueOnce(undefined);
+  await invoke('threads:delete', 'sid', repo, tree);
+  expect(existsSync(tree)).toBe(false);
+  expect(git('branch', '--list', 'zephyr/abc')).toContain('zephyr/abc');
+  expect(sdk.deleteSession).toHaveBeenCalledWith('sid', { dir: tree });
+});
+
+it('sets a worktree up with its env and setup command, then squash merges its work and removes it', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { existsSync, lstatSync } = await import('node:fs');
+  const { mkdir, mkdtemp, readFile, writeFile } =
+    await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const repo = await mkdtemp(path.join(tmpdir(), 'zephyr-merge-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 't');
+  git('config', 'user.email', 't@t');
+  await writeFile(path.join(repo, '.gitignore'), '.env\nnode_modules/\n');
+  await writeFile(path.join(repo, 'a.txt'), 'base\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'init');
+  await writeFile(path.join(repo, '.env'), 'KEY=1');
+
+  const tree = path.join(repo, '.zephyr', 'worktrees', 'm1');
+  expect(await invoke('git:setup', repo)).toBeNull();
+  expect(
+    await invoke('git:worktree', repo, 'm1', 'mkdir node_modules'),
+  ).toMatchObject({ setup: { command: 'mkdir node_modules', ok: true } });
+  expect(await readFile(path.join(tree, '.env'), 'utf8')).toBe('KEY=1');
+  expect(existsSync(path.join(tree, 'node_modules'))).toBe(true);
+  expect(git('-C', tree, 'status', '--porcelain')).toBe('');
+
+  await writeFile(path.join(tree, 'a.txt'), 'changed\n');
+  await writeFile(path.join(repo, 'staged.txt'), 'x');
+  git('add', 'staged.txt');
+  await expect(invoke('git:merge', repo, tree, 'Thread title')).rejects.toThrow(
+    /staged/,
+  );
+  git('reset', '-q', 'staged.txt');
+
+  await invoke('git:merge', repo, tree, 'Thread title');
+  expect(git('log', '-1', '--format=%s')).toBe('Thread title');
+  expect(await readFile(path.join(repo, 'a.txt'), 'utf8')).toBe('changed\n');
+  expect(existsSync(tree)).toBe(false);
+  expect(git('branch', '--list', 'zephyr/m1')).toBe('');
+
+  const clash = path.join(repo, '.zephyr', 'worktrees', 'm2');
+  await writeFile(path.join(repo, 'Cargo.lock'), '');
+  expect(await invoke('git:setup', repo)).toBe('cargo fetch');
+  expect(
+    await invoke('git:worktree', repo, 'm2', 'echo nope >&2; exit 3'),
+  ).toMatchObject({ setup: { ok: false, output: 'nope' } });
+  await writeFile(path.join(clash, 'a.txt'), 'theirs\n');
+  await writeFile(path.join(repo, 'a.txt'), 'ours\n');
+  git('commit', '-qam', 'ours');
+  await expect(invoke('git:merge', repo, clash, 'Clash')).rejects.toThrow(
+    /conflict/i,
+  );
+  expect(git('status', '--porcelain', '--untracked-files=no')).toBe('');
+  expect(existsSync(clash)).toBe(true);
+});
+
 type Step = { value: unknown } | { done: true } | { error: Error };
 
 // A controllable stand-in for the SDK Query: tests push what it yields.

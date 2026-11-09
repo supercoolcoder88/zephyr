@@ -41,7 +41,7 @@ export function Questions({
     [...picked[i], other[i].trim()].filter(Boolean).join(', ');
   const Row = onAnswer ? 'label' : 'div';
   const row =
-    'group flex gap-3 px-2 py-1 has-checked:bg-paper has-checked:text-void has-focus-visible:outline has-focus-visible:outline-cyan has-[input]:cursor-pointer has-[input]:hover:bg-line has-checked:hover:bg-ink';
+    'group relative flex gap-3 px-2 py-1 has-checked:bg-paper has-checked:text-void has-focus-visible:outline has-focus-visible:outline-cyan has-[input]:cursor-pointer has-[input]:hover:bg-line has-checked:hover:bg-ink';
   return (
     <div
       role="group"

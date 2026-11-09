@@ -15,6 +15,7 @@ import type {
 } from '../../agent-types';
 import Button from '../ui/Button';
 import ModelPicker from './ModelPicker';
+import BranchPicker from './BranchPicker';
 
 // Cached per workspace until its skills change on disk.
 const catalogs = new Map<string, ReturnType<AgentApi['catalog']>>();
@@ -53,6 +54,11 @@ function parse(prompt: string, commands: SlashCommand[]) {
 
 interface Props {
   cwd: string;
+  isolated: boolean;
+  locked: boolean;
+  onIsolate(isolated: boolean): void;
+  // Offered once a worktree thread is idle.
+  onMerge?: () => void;
   running: boolean;
   history: string[];
   prompt: string;
@@ -66,6 +72,10 @@ interface Props {
 
 export default function Composer({
   cwd,
+  isolated,
+  locked,
+  onIsolate,
+  onMerge,
   running,
   history,
   prompt,
@@ -433,7 +443,16 @@ export default function Composer({
           />
         </div>
       </div>
-      <ModelPicker models={models} choice={choice} onChoose={choose} />
+      <div className="flex flex-col items-end">
+        <ModelPicker models={models} choice={choice} onChoose={choose} />
+        <BranchPicker
+          cwd={cwd}
+          isolated={isolated}
+          locked={locked}
+          onIsolate={onIsolate}
+          onMerge={onMerge}
+        />
+      </div>
       {running && (
         <Button variant="outline-destructive" size="lg" onClick={onCancel}>
           [ STOP ]

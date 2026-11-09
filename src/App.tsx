@@ -36,12 +36,14 @@ function merge(
       (t) =>
         (t.draft || running.includes(t.id)) && !list.some((l) => l.id === t.id),
     ),
-    ...list.map(({ id, title, createdAt, updatedAt }) => {
+    ...list.map(({ id, title, createdAt, updatedAt, worktree, branch }) => {
       const known = mine.find((t) => t.id === id);
       return {
         id,
         title,
         cwd,
+        worktree,
+        branch,
         createdAt,
         updatedAt,
         status: known?.status,
@@ -86,6 +88,8 @@ export default function App() {
         draft?: true;
         running?: boolean;
         stopping?: boolean;
+        // Where the session runs, known once an isolated thread's worktree exists.
+        dir?: Promise<string>;
       }
     >(),
   );
@@ -305,7 +309,7 @@ export default function App() {
   function send(prompt: string, images: Image[], choice: ModelChoice) {
     if (!active) return;
     setDeleteError(undefined);
-    const { id, cwd, draft } = active;
+    const { id, cwd, draft, isolated, worktree } = active;
     const uuid = crypto.randomUUID();
     const message = {
       type: 'user' as const,
@@ -314,6 +318,33 @@ export default function App() {
     };
     const runId = runOf(id) ?? crypto.randomUUID();
     const queue = runs.current.get(runId)?.running;
+    const dir =
+      runs.current.get(runId)?.dir ??
+      (isolated && !worktree
+        ? window.agent
+            .createWorktree(
+              cwd,
+              id.slice(0, 8),
+              JSON.parse(localStorage.getItem('setup') ?? '{}')[cwd] ||
+                undefined,
+            )
+            .then(({ path, branch, setup }) => {
+              patch(id, (t) => ({ ...t, worktree: path, branch }));
+              if (setup)
+                append(id, {
+                  type: 'tool',
+                  id: crypto.randomUUID(),
+                  name: 'Setup',
+                  input: { command: setup.command },
+                });
+              if (setup && !setup.ok)
+                append(id, {
+                  type: 'error',
+                  message: `Setup failed\n${setup.output}`,
+                });
+              return path;
+            })
+        : Promise.resolve(worktree ?? cwd));
     patch(id, (t) => ({
       ...t,
       title:
@@ -333,21 +364,26 @@ export default function App() {
       cwd,
       draft,
       running: true,
+      dir,
     });
     setRunningIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
     setFinishedId(undefined);
-    window.agent
-      .send(
-        runId,
-        prompt,
-        images,
-        cwd,
-        draft ? undefined : id,
-        choice,
-        permission,
-        uuid,
+    dir
+      .then((d) =>
+        window.agent.send(
+          runId,
+          prompt,
+          images,
+          d,
+          draft ? undefined : id,
+          choice,
+          permission,
+          uuid,
+        ),
       )
       .catch((err) => {
+        // A failed worktree is retried on the next send.
+        runs.current.get(runId)!.dir = undefined;
         report(runs.current.get(runId)!.id)(err);
         finish(runId);
       });
@@ -373,7 +409,7 @@ export default function App() {
     setFinishedId(undefined);
     setDeleteError(undefined);
     if (thread.items) return;
-    window.agent.loadThread(thread.id, thread.cwd).then(
+    window.agent.loadThread(thread.id, thread.worktree ?? thread.cwd).then(
       (items) => patch(thread.id, (t) => ({ ...t, items })),
       (err) =>
         patch(thread.id, (t) => ({
@@ -429,7 +465,7 @@ export default function App() {
     }
     if (!thread.draft) {
       try {
-        await window.agent.deleteThread(id, thread.cwd);
+        await window.agent.deleteThread(id, thread.cwd, thread.worktree);
       } catch (err) {
         setDeleteError(err instanceof Error ? err.message : String(err));
         return;
@@ -444,6 +480,19 @@ export default function App() {
     const fresh = newThread(thread.cwd);
     setThreads((prev) => [fresh, ...prev]);
     select(fresh);
+  }
+
+  async function mergeWorktree(thread: Thread) {
+    try {
+      await window.agent.mergeWorktree(
+        thread.cwd,
+        thread.worktree!,
+        thread.title,
+      );
+    } catch (err) {
+      return report(thread.id)(err);
+    }
+    await remove(thread.id);
   }
 
   async function openWorkspace(picked?: string) {
@@ -596,6 +645,13 @@ export default function App() {
                 onSend={send}
                 onPrompt={(prompt) =>
                   patch(active.id, (t) => ({ ...t, prompt }))
+                }
+                onMerge={() => mergeWorktree(active)}
+                onIsolate={(isolated) =>
+                  patch(active.id, (t) => ({
+                    ...t,
+                    isolated: isolated || undefined,
+                  }))
                 }
                 onImages={(update) =>
                   patch(active.id, (t) => ({
