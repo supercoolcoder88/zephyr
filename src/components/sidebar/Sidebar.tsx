@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
-import type { Permission, UsageWindow } from '../../agent-types';
+import { ArrowDown, ArrowUp, Settings as SettingsIcon, X } from 'lucide-react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import type { Permission } from '../../agent-types';
 import { stateDot, threadState, type Thread } from '../../thread';
 import Button from '../ui/Button';
-import MenuItem from '../ui/MenuItem';
-import useDismiss from '../ui/useDismiss';
+import Settings from '../settings/Settings';
 
 interface Props {
   workspace: string;
   onOpenWorkspace(): void;
-  threads: Thread[];
+  current: Thread[];
+  archived: Thread[];
+  onArchive(id: string, value: boolean): void;
   activeId: string;
   runningIds: string[];
   onSelect(id: string): void;
@@ -19,27 +21,19 @@ interface Props {
   onPermission(permission: Permission): void;
 }
 
-// Read threads past this many are tucked into the archive at the bottom.
-const KEEP_INACTIVE = 3;
-
-const modes: [Permission, string][] = [
-  ['auto', 'Auto'],
-  ['default', 'Ask'],
-  ['acceptEdits', 'Accept edits'],
-  ['plan', 'Plan'],
-  ['bypassPermissions', 'Bypass'],
-];
-
-const nextTheme: Record<string, string> = {
-  dark: 'cyber',
-  cyber: 'light',
-  light: 'dark',
-};
+const icon = {
+  size: 14,
+  strokeWidth: 1.5,
+  strokeLinecap: 'square',
+  strokeLinejoin: 'miter',
+} as const;
 
 export default function Sidebar({
   workspace,
   onOpenWorkspace,
-  threads,
+  current,
+  archived,
+  onArchive,
   activeId,
   runningIds,
   onSelect,
@@ -51,48 +45,45 @@ export default function Sidebar({
 }: Props) {
   const [confirmId, setConfirmId] = useState<string>();
   const [showArchived, setShowArchived] = useState(false);
-  const [theme, setTheme] = useState(document.documentElement.dataset.theme);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const [usage, setUsage] = useState<
-    'closed' | 'loading' | 'error' | UsageWindow[] | null
-  >('closed');
-  const [modeOpen, setModeOpen] = useState(false);
-  const footer = useRef<HTMLElement>(null);
-  const modeMenu = useRef<HTMLUListElement>(null);
-  const modeTrigger = useRef<HTMLButtonElement>(null);
-  const usageOpen = usage !== 'closed';
+  const lastRead = useRef<string>(undefined);
+  useEffect(() => () => void (lastRead.current = activeId), [activeId]);
 
-  useDismiss(footer, usageOpen || modeOpen, () => {
-    setUsage('closed');
-    setModeOpen(false);
+  const onKey = useEffectEvent((e: KeyboardEvent) => {
+    // Plain Tab never moves focus between controls.
+    if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey) return e.preventDefault();
+    if ((!e.ctrlKey && !e.metaKey) || document.querySelector('[aria-modal]'))
+      return;
+    const key = e.key.toLowerCase();
+    if (key === 'tab') {
+      const shown = showArchived ? [...current, ...archived] : current;
+      const cycle =
+        localStorage.getItem('cycle') === 'all'
+          ? shown
+          : shown.filter(
+              (t) =>
+                t.id === activeId ||
+                t.id === lastRead.current ||
+                threadState(t, runningIds) !== 'read',
+            );
+      const i = cycle.findIndex((t) => t.id === activeId);
+      const next = cycle.at((i + (e.shiftKey ? -1 : 1)) % cycle.length);
+      if (next && next.id !== activeId) onSelect(next.id);
+    } else if (key === 'n') onNew();
+    else if (key === 'o') onOpenWorkspace();
+    else if (key === ',') setSettingsOpen(true);
+    else return;
+    e.preventDefault();
   });
 
   useEffect(() => {
-    if (modeOpen)
-      modeMenu.current
-        ?.querySelector<HTMLElement>('[aria-checked=true]')
-        ?.focus();
-  }, [modeOpen]);
+    const listener = (e: KeyboardEvent) => onKey(e);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
 
-  function toggleUsage() {
-    setModeOpen(false);
-    if (usageOpen) return setUsage('closed');
-    setUsage('loading');
-    window.agent.usage(workspace).then(
-      (windows) => setUsage((u) => (u === 'closed' ? u : windows)),
-      () => setUsage((u) => (u === 'closed' ? u : 'error')),
-    );
-  }
-
-  const inactive = threads.filter(
-    (t) => !t.draft && threadState(t, runningIds) === 'read',
-  );
-  const archived = inactive
-    .slice(KEEP_INACTIVE)
-    .filter((t) => t.id !== activeId);
-  const current = threads.filter((t) => !archived.includes(t));
-
-  function row(thread: Thread) {
+  function row(thread: Thread, isArchived = false) {
     const active = thread.id === activeId;
     const confirming = confirmId === thread.id;
     return (
@@ -120,29 +111,37 @@ export default function Sidebar({
           <span className="flex-1 truncate">{thread.title}</span>
         </button>
         {!runningIds.includes(thread.id) && (
-          <button
-            type="button"
-            onClick={() =>
-              confirming ? onDelete(thread.id) : setConfirmId(thread.id)
-            }
-            className={`shrink-0 pl-3 text-2xs tracking-widest transition-[color,opacity] duration-150 ease-mech hover:text-alert ${
+          <span
+            className={`flex shrink-0 items-center gap-1 pl-3 transition-opacity duration-150 ease-mech ${
               confirming
                 ? 'text-alert'
                 : `opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 ${active ? 'text-void/50' : 'text-mute'}`
             }`}
           >
-            {confirming ? '[ CONFIRM ]' : '[ DEL ]'}
-          </button>
+            {!confirming && !thread.draft && (
+              <button
+                type="button"
+                aria-label={isArchived ? 'Unarchive' : 'Archive'}
+                onClick={() => onArchive(thread.id, !isArchived)}
+                className={`grid size-5 place-items-center transition-colors duration-150 ease-mech ${active ? 'hover:text-void' : 'hover:text-ink'}`}
+              >
+                {isArchived ? <ArrowUp {...icon} /> : <ArrowDown {...icon} />}
+              </button>
+            )}
+            <button
+              type="button"
+              aria-label={confirming ? undefined : 'Delete'}
+              onClick={() =>
+                confirming ? onDelete(thread.id) : setConfirmId(thread.id)
+              }
+              className="grid h-5 min-w-5 place-items-center text-2xs tracking-widest transition-colors duration-150 ease-mech hover:text-alert"
+            >
+              {confirming ? '[ CONFIRM ]' : <X {...icon} />}
+            </button>
+          </span>
         )}
       </div>
     );
-  }
-
-  function toggleTheme() {
-    const next = nextTheme[theme ?? 'dark'];
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem('theme', next);
-    setTheme(next);
   }
 
   return (
@@ -156,18 +155,8 @@ export default function Sidebar({
         </span>
         <Button onClick={onNew}>[ + NEW ]</Button>
       </header>
-      <button
-        type="button"
-        onClick={onOpenWorkspace}
-        title={workspace}
-        className="flex h-8 w-full items-center border-b border-line px-4 text-left text-2xs tracking-widest text-mute uppercase transition-colors duration-150 ease-mech hover:bg-line hover:text-ink"
-      >
-        <span className="truncate">
-          {workspace.split(/[\\/]/).filter(Boolean).pop()}
-        </span>
-      </button>
       <nav className="flex-1 overflow-y-auto py-2">
-        {current.map(row)}
+        {current.map((t) => row(t))}
         {archived.length > 0 && (
           <>
             <Button
@@ -180,147 +169,37 @@ export default function Sidebar({
                 ? '[ HIDE ARCHIVED ]'
                 : `[ ARCHIVED ${archived.length} ]`}
             </Button>
-            {showArchived && archived.map(row)}
+            {showArchived && archived.map((t) => row(t, true))}
           </>
         )}
       </nav>
       {error && <p className="px-4 py-2 text-2xs text-alert">{error}</p>}
-      <footer
-        ref={footer}
-        className="relative flex h-10 items-center gap-3 border-t border-line px-4"
-      >
-        {usageOpen && (
-          <div
-            role="dialog"
-            aria-label="Usage"
-            className="absolute inset-x-0 bottom-full space-y-3 border-t border-line bg-panel px-4 py-3 text-2xs tracking-widest uppercase"
-          >
-            {usage === 'loading' ? (
-              <p className="text-mute">Loading</p>
-            ) : usage === 'error' ? (
-              <p className="text-alert">Usage unavailable</p>
-            ) : !usage?.length ? (
-              <p className="text-mute">No plan limits</p>
-            ) : (
-              usage.map((w) => (
-                <div key={w.label} className="space-y-1">
-                  <div className="flex justify-between">
-                    <span>{w.label}</span>
-                    <span>{Math.round(w.utilization)}%</span>
-                  </div>
-                  <div className="h-1 bg-line">
-                    <div
-                      className={`h-full ${w.utilization >= 90 ? 'bg-alert' : 'bg-ink'}`}
-                      style={{ width: `${Math.min(w.utilization, 100)}%` }}
-                    />
-                  </div>
-                  {w.resetsAt && (
-                    <p className="text-mute">
-                      Resets{' '}
-                      {new Date(w.resetsAt).toLocaleString(undefined, {
-                        weekday: 'short',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                      })}
-                    </p>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        )}
-        {modeOpen && (
-          <ul
-            ref={modeMenu}
-            role="menu"
-            aria-label="Permission mode"
-            onBlur={(e) => {
-              const to = e.relatedTarget;
-              if (!e.currentTarget.contains(to) && to !== modeTrigger.current)
-                setModeOpen(false);
-            }}
-            onKeyDown={(e) => {
-              const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
-              if (e.key === 'Escape') modeTrigger.current?.focus();
-              if (!step) return;
-              e.preventDefault();
-              const items = [
-                ...e.currentTarget.querySelectorAll<HTMLElement>('button'),
-              ];
-              const at = items.indexOf(e.target as HTMLElement);
-              items[(at + step + items.length) % items.length].focus();
-            }}
-            className="absolute inset-x-0 bottom-full border-t border-line bg-panel py-1"
-          >
-            {modes.map(([value, label]) => (
-              <li key={value}>
-                <MenuItem
-                  checked={permission === value}
-                  onClick={() => {
-                    onPermission(value);
-                    setModeOpen(false);
-                    modeTrigger.current?.focus();
-                  }}
-                >
-                  {label}
-                </MenuItem>
-              </li>
-            ))}
-          </ul>
-        )}
+      <footer className="flex h-10 items-center border-t border-line px-4">
         <Button
-          onClick={toggleTheme}
-          aria-label={`${nextTheme[theme ?? 'dark']} mode`}
+          aria-label="Settings"
+          aria-expanded={settingsOpen}
+          onClick={() => setSettingsOpen(true)}
         >
-          <svg
-            viewBox="0 0 16 16"
-            className="size-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          >
-            {theme === 'light' ? (
-              <path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5Z" />
-            ) : theme === 'dark' ? (
-              <path d="M8 2 14.5 13.5h-13Z" />
-            ) : (
-              <>
-                <rect x="5" y="5" width="6" height="6" />
-                <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5 13 13M3 13l1.5-1.5M11.5 4.5 13 3" />
-              </>
-            )}
-          </svg>
+          <SettingsIcon {...icon} />
         </Button>
         <Button
-          onClick={toggleUsage}
-          aria-label="Usage"
-          aria-expanded={usageOpen}
+          title={workspace}
+          onClick={onOpenWorkspace}
+          className="ml-3 min-w-0"
         >
-          <svg
-            viewBox="0 0 16 16"
-            className="size-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="square"
-          >
-            <path d="M2 14h12M4 11v-3M8 11V3M12 11V6" />
-          </svg>
-        </Button>
-        <Button
-          ref={modeTrigger}
-          onClick={() => {
-            setUsage('closed');
-            setModeOpen(!modeOpen);
-          }}
-          aria-haspopup="menu"
-          aria-expanded={modeOpen}
-          className="ml-auto"
-        >
-          [ {modes.find(([m]) => m === permission)?.[1] ?? permission} ]
+          <span className="block truncate uppercase">
+            {workspace.split(/[\\/]/).filter(Boolean).pop()}
+          </span>
         </Button>
       </footer>
+      {settingsOpen && (
+        <Settings
+          workspace={workspace}
+          permission={permission}
+          onPermission={onPermission}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </aside>
   );
 }

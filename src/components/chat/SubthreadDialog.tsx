@@ -38,18 +38,6 @@ export default function SubthreadDialog({ subthread, onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label={subthread.title}
-        onKeyDown={(e) => {
-          if (e.key !== 'Tab') return;
-          const items = [
-            ...e.currentTarget.querySelectorAll<HTMLElement>(
-              'button, a[href], [tabindex]:not([tabindex="-1"])',
-            ),
-          ];
-          const edge = e.shiftKey ? items[0] : items.at(-1);
-          if (document.activeElement !== edge) return;
-          e.preventDefault();
-          (e.shiftKey ? items.at(-1) : items[0])?.focus();
-        }}
         className="flex max-h-full w-full max-w-3xl flex-col border border-line-strong bg-void"
       >
         <header className="flex h-12 shrink-0 items-center gap-4 border-b border-line px-6">

@@ -143,16 +143,17 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = () => undefined;
 });
 
+const now = Date.now();
 const list = [
-  { id: 'b', title: 'Newest', updatedAt: 2 },
-  { id: 'a', title: 'Older', updatedAt: 1 },
+  { id: 'b', title: 'Newest', createdAt: now - 1, updatedAt: now - 1 },
+  { id: 'a', title: 'Older', createdAt: now - 2, updatedAt: now - 2 },
 ];
 
 const sidebarTitles = () =>
   within(screen.getByRole('navigation'))
     .getAllByRole('button')
     .map((b) => b.textContent)
-    .filter((t) => !/^\[ (DEL|CONFIRM) \]$/.test(t ?? ''));
+    .filter((t) => t && t !== '[ CONFIRM ]');
 
 const heading = () => screen.getByRole('heading', { level: 1 }).textContent;
 
@@ -162,7 +163,7 @@ const row = (title: RegExp) =>
 async function open() {
   const user = userEvent.setup();
   render(<App />);
-  await user.click(screen.getByRole('button', { name: '[ OPEN PROJECT ]' }));
+  await user.click(screen.getByRole('button', { name: '[ OPEN FOLDER ]' }));
   await screen.findByRole('navigation');
   return user;
 }
@@ -355,7 +356,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   expect(heading()).toBe('first prompt');
 
   agent.listThreads.mockResolvedValueOnce([
-    { id: 'sid', title: 'Summarised title', updatedAt: 3 },
+    { id: 'sid', title: 'Summarised title', createdAt: now, updatedAt: now },
     ...list,
   ]);
   await act(async () => finishRun());
@@ -383,11 +384,11 @@ it('swaps a draft to its session id and refreshes the list after the run', async
 it('shows no delete control on the running thread', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
-  expect(row(/Newest/).getByRole('button', { name: '[ DEL ]' })).toBeTruthy();
-  expect(row(/Older/).getByRole('button', { name: '[ DEL ]' })).toBeTruthy();
+  expect(row(/Newest/).getByRole('button', { name: 'Delete' })).toBeTruthy();
+  expect(row(/Older/).getByRole('button', { name: 'Delete' })).toBeTruthy();
   await sendPrompt(user, 'go');
-  expect(row(/Newest/).queryByRole('button', { name: '[ DEL ]' })).toBeNull();
-  expect(row(/Older/).getByRole('button', { name: '[ DEL ]' })).toBeTruthy();
+  expect(row(/Newest/).queryByRole('button', { name: 'Delete' })).toBeNull();
+  expect(row(/Older/).getByRole('button', { name: 'Delete' })).toBeTruthy();
 });
 
 it('runs threads concurrently and routes events by run', async () => {
@@ -429,7 +430,7 @@ it('runs threads concurrently and routes events by run', async () => {
 it('asks for confirmation before deleting', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
-  await user.click(row(/Older/).getByRole('button', { name: '[ DEL ]' }));
+  await user.click(row(/Older/).getByRole('button', { name: 'Delete' }));
   expect(agent.deleteThread).not.toHaveBeenCalled();
   expect(sidebarTitles()).toEqual(['Newest', 'Older']);
   await user.click(row(/Older/).getByRole('button', { name: '[ CONFIRM ]' }));
@@ -452,12 +453,12 @@ it.each([
 ])('cancels the confirmation when %s', async (_, cancel) => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
-  await user.click(row(/Older/).getByRole('button', { name: '[ DEL ]' }));
+  await user.click(row(/Older/).getByRole('button', { name: 'Delete' }));
   expect(
     row(/Older/).getByRole('button', { name: '[ CONFIRM ]' }),
   ).toBeTruthy();
   await cancel(user);
-  expect(row(/Older/).getByRole('button', { name: '[ DEL ]' })).toBeTruthy();
+  expect(row(/Older/).getByRole('button', { name: 'Delete' })).toBeTruthy();
   expect(
     row(/Older/).queryByRole('button', { name: '[ CONFIRM ]' }),
   ).toBeNull();
@@ -465,7 +466,7 @@ it.each([
 });
 
 async function remove(user: User, title: RegExp) {
-  await user.click(row(title).getByRole('button', { name: '[ DEL ]' }));
+  await user.click(row(title).getByRole('button', { name: 'Delete' }));
   await user.click(row(title).getByRole('button', { name: '[ CONFIRM ]' }));
 }
 
@@ -523,10 +524,10 @@ it('keeps the row and shows the error when deleting fails', async () => {
   expect(screen.queryByText('permission denied')).toBeNull();
 });
 
-it('orders threads by state and clears outcomes once seen', async () => {
+it('keeps threads in creation order and clears outcomes once seen', async () => {
   agent.listThreads.mockResolvedValue([
     ...list,
-    { id: 'c', title: 'Oldest', updatedAt: 0 },
+    { id: 'c', title: 'Oldest', createdAt: now - 3, updatedAt: now - 3 },
   ]);
   const user = await open();
   const state = (title: RegExp) =>
@@ -537,58 +538,88 @@ it('orders threads by state and clears outcomes once seen', async () => {
   await sendPrompt(user, 'go');
   const runC = lastRunId();
   expect(state(/Oldest/)).toBe('running');
-  expect(sidebarTitles()).toEqual(['Oldest', 'Newest', 'Older']);
+  expect(sidebarTitles()).toEqual(['Newest', 'Older', 'Oldest']);
 
   await user.click(screen.getByRole('button', { name: /Older/ }));
   await sendPrompt(user, 'go');
   act(() => emit({ type: 'error', message: 'boom' }, runC));
   await act(async () => finishRun(runC));
-  expect(state(/Oldest/)).toBe('error');
-  expect(sidebarTitles()).toEqual(['Oldest', 'Older', 'Newest']);
-
   act(() => emit({ type: 'done', ok: true, result: 'ok' }));
   await act(async () => finishRun());
+  expect(state(/Oldest/)).toBe('error');
   expect(state(/Older/)).toBe('done');
-  expect(sidebarTitles()).toEqual(['Oldest', 'Older', 'Newest']);
+  expect(sidebarTitles()).toEqual(['Newest', 'Older', 'Oldest']);
 
   await user.click(screen.getByRole('button', { name: /Oldest/ }));
   expect(state(/Oldest/)).toBe('read');
   expect(state(/Older/)).toBe('read');
-  expect(sidebarTitles()).toEqual(['Newest', 'Older', 'Oldest']);
 });
 
-it('archives read threads past the newest three', async () => {
-  agent.listThreads.mockResolvedValue(
-    [5, 4, 3, 2, 1].map((n) => ({ id: `t${n}`, title: `T${n}`, updatedAt: n })),
-  );
+it('archives threads untouched since before today', async () => {
+  const day = 86_400_000;
+  agent.listThreads.mockResolvedValue([
+    { id: 't', title: 'Today', createdAt: now - 2 * day, updatedAt: now - 1 },
+    { id: 'y', title: 'Yesterday', createdAt: now - day, updatedAt: now - day },
+    {
+      id: 'o',
+      title: 'Old',
+      createdAt: now - 3 * day,
+      updatedAt: now - 3 * day,
+    },
+  ]);
   const user = await open();
-  expect(sidebarTitles()).toEqual(['T5', 'T4', 'T3', '[ ARCHIVED 2 ]']);
+  expect(sidebarTitles()).toEqual(['Today', '[ ARCHIVED 2 ]']);
 
   await user.click(screen.getByRole('button', { name: '[ ARCHIVED 2 ]' }));
   expect(sidebarTitles()).toEqual([
-    'T5',
-    'T4',
-    'T3',
+    'Today',
     '[ HIDE ARCHIVED ]',
-    'T2',
-    'T1',
+    'Yesterday',
+    'Old',
   ]);
-
-  await user.click(screen.getByRole('button', { name: /T1/ }));
-  await user.click(screen.getByRole('button', { name: '[ HIDE ARCHIVED ]' }));
-  expect(sidebarTitles()).toEqual(['T5', 'T4', 'T3', 'T1', '[ ARCHIVED 1 ]']);
-
-  await sendPrompt(user, 'go');
-  expect(sidebarTitles()).toEqual(['T1', 'T5', 'T4', 'T3', '[ ARCHIVED 1 ]']);
 });
 
-it('puts a new thread above running threads', async () => {
+it('archives a thread by hand and unarchives it to the top, across restarts', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  let user = await open();
+  await user.click(row(/Newest/).getByRole('button', { name: 'Archive' }));
+  expect(sidebarTitles()).toEqual(['Older', '[ ARCHIVED 1 ]']);
+
+  cleanup();
+  user = await open();
+  await user.click(screen.getByRole('button', { name: '[ ARCHIVED 1 ]' }));
+  await user.click(row(/Older/).getByRole('button', { name: 'Archive' }));
+  await user.click(row(/Older/).getByRole('button', { name: 'Unarchive' }));
+  expect(sidebarTitles()).toEqual(['Older', '[ HIDE ARCHIVED ]', 'Newest']);
+
+  cleanup();
+  await open();
+  expect(sidebarTitles()).toEqual(['Older', '[ ARCHIVED 1 ]']);
+});
+
+it('opens the next listed thread after deleting an unarchived one', async () => {
+  agent.listThreads.mockResolvedValue([
+    ...list,
+    { id: 'c', title: 'Oldest', createdAt: now - 3, updatedAt: now - 3 },
+  ]);
+  const user = await open();
+  await user.click(row(/Oldest/).getByRole('button', { name: 'Archive' }));
+  await user.click(screen.getByRole('button', { name: '[ ARCHIVED 1 ]' }));
+  await user.click(row(/Oldest/).getByRole('button', { name: 'Unarchive' }));
+  await user.click(screen.getByRole('button', { name: /Oldest/ }));
+  await user.click(row(/Oldest/).getByRole('button', { name: 'Delete' }));
+  await user.click(row(/Oldest/).getByRole('button', { name: '[ CONFIRM ]' }));
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
+  expect(heading()).toBe('Newest');
+});
+
+it('puts a new thread at the top', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
   await user.click(screen.getByRole('button', { name: /Older/ }));
   await sendPrompt(user, 'go');
   await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
-  expect(sidebarTitles()).toEqual(['New thread', 'Older', 'Newest']);
+  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
 });
 
 it('runs a slash command picked from the menu', async () => {
@@ -1167,7 +1198,9 @@ it('closes the live session of a deleted thread', async () => {
 
 it("closes the left project's idle sessions and resumes them on return", async () => {
   agent.listThreads.mockImplementation(async (cwd: string) =>
-    cwd === '/proj' ? list : [{ id: 'o', title: 'Other', updatedAt: 3 }],
+    cwd === '/proj'
+      ? list
+      : [{ id: 'o', title: 'Other', createdAt: now, updatedAt: now }],
   );
   const user = await open();
   await sendPrompt(user, 'first');
@@ -1199,20 +1232,20 @@ it("closes the left project's idle sessions and resumes them on return", async (
   );
 });
 
-it('defaults to auto mode and switches mode from the sidebar', async () => {
+it('defaults to auto mode and switches mode from settings', async () => {
   agent.listThreads.mockResolvedValue(list);
+  agent.usage.mockResolvedValue(null);
   const user = await open();
   await sendPrompt(user, 'go');
   const runId = lastRunId();
   expect(agent.send.mock.lastCall![6]).toBe('auto');
-  await user.click(screen.getByRole('button', { name: '[ Auto ]' }));
-  const menu = screen.getByRole('menu', { name: 'Permission mode' });
-  expect(
-    within(menu).getByRole('menuitemradio', { name: 'Auto' }),
-  ).toHaveAttribute('aria-checked', 'true');
-  await user.click(within(menu).getByRole('menuitemradio', { name: 'Plan' }));
-  expect(screen.queryByRole('menu', { name: 'Permission mode' })).toBeNull();
-  expect(screen.getByRole('button', { name: '[ Plan ]' })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Agent' }));
+  const modes = screen.getByRole('radiogroup', { name: 'Permission mode' });
+  expect(within(modes).getByRole('radio', { name: 'Auto' })).toBeChecked();
+  await user.click(within(modes).getByRole('radio', { name: 'Plan' }));
+  expect(within(modes).getByRole('radio', { name: 'Plan' })).toBeChecked();
+  await user.keyboard('{Escape}');
   expect(localStorage.getItem('mode')).toBe('plan');
   expect(agent.setPermission).toHaveBeenCalledWith(runId, 'plan');
   await sendPrompt(user, 'more');
@@ -1452,59 +1485,54 @@ it('marks a thread as waiting while a tool call needs permission', async () => {
   expect(screen.getByRole('status', { name: 'Working' })).toBeInTheDocument();
 });
 
-it('opens the mode menu and usage one at a time and closes them on Escape or outside click', async () => {
+it('opens settings from the sidebar cog and closes it from X, Escape or outside click', async () => {
   agent.usage.mockResolvedValue(null);
   const user = await open();
-  const button = screen.getByRole('button', { name: '[ Auto ]' });
-  const settings = () =>
-    screen.queryByRole('menu', { name: 'Permission mode' });
-  const usage = () => screen.queryByRole('dialog', { name: 'Usage' });
+  const cog = screen.getByRole('button', { name: 'Settings' });
+  const settings = () => screen.queryByRole('dialog', { name: 'Settings' });
 
-  expect(button).toHaveAttribute('aria-expanded', 'false');
-  await user.click(button);
-  expect(settings()).toBeInTheDocument();
-  expect(button).toHaveAttribute('aria-expanded', 'true');
-  await user.click(button);
+  await user.click(cog);
+  expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'Usage' }));
+  expect(await screen.findByText('No plan limits')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Close' }));
   expect(settings()).toBeNull();
+  expect(cog).toHaveFocus();
 
-  await user.click(button);
+  await user.click(cog);
+  expect(
+    screen.getByRole('heading', { name: 'Appearance' }),
+  ).toBeInTheDocument();
   await user.keyboard('{Escape}');
   expect(settings()).toBeNull();
 
-  await user.click(button);
-  await user.click(screen.getByRole('heading', { level: 1 }));
+  await user.click(cog);
+  await user.click(settings()!.parentElement!);
   expect(settings()).toBeNull();
-
-  await user.click(button);
-  await user.click(screen.getByRole('button', { name: 'Usage' }));
-  expect(settings()).toBeNull();
-  expect(usage()).toBeInTheDocument();
-  await user.click(button);
-  expect(usage()).toBeNull();
-  expect(settings()).toBeInTheDocument();
 });
 
-it('moves through the mode menu from the keyboard', async () => {
+it('lists usage limits and hotkeys in settings', async () => {
+  agent.usage.mockResolvedValue([
+    { label: 'Session', utilization: 42.4, resetsAt: null },
+  ]);
   const user = await open();
-  const button = screen.getByRole('button', { name: '[ Auto ]' });
-  await user.click(button);
-  const item = (name: string) => screen.getByRole('menuitemradio', { name });
-  expect(item('Auto')).toHaveFocus();
-  await user.keyboard('{ArrowUp}');
-  expect(item('Bypass')).toHaveFocus();
-  await user.keyboard('{ArrowDown}{ArrowDown}');
-  expect(item('Ask')).toHaveFocus();
-  await user.hover(item('Plan'));
-  expect(item('Plan')).toHaveFocus();
-  expect(item('Ask')).not.toHaveFocus();
-  await user.keyboard('{Escape}');
-  expect(screen.queryByRole('menu')).toBeNull();
-  expect(button).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Usage' }));
+  expect(screen.getByText('Session')).toBeInTheDocument();
+  expect(screen.getByText('42%')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Hotkeys' }));
+  expect(screen.getByText('Toggle todos')).toBeInTheDocument();
+  expect(screen.getByText('Ctrl + T')).toBeInTheDocument();
+});
 
-  await user.click(button);
-  item('Bypass').focus();
-  await user.tab();
-  expect(screen.queryByRole('menu')).toBeNull();
+it('switches theme from settings and remembers it', async () => {
+  agent.usage.mockResolvedValue(null);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('radio', { name: 'light' }));
+  expect(screen.getByRole('radio', { name: 'light' })).toBeChecked();
+  expect(document.documentElement.dataset.theme).toBe('light');
+  expect(localStorage.getItem('theme')).toBe('light');
 });
 
 it('keeps a pending permission when another thread finishes', async () => {
@@ -1909,4 +1937,52 @@ it('marks the chat as a drop target while a todo is dragged', async () => {
   fireEvent.drop(box, { dataTransfer });
   expect(target()).toBeNull();
   expect(box).toHaveValue('ship');
+});
+
+it('opens a new thread, a workspace and settings from the keyboard', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  agent.usage.mockResolvedValue(null);
+  const user = await open();
+  await user.keyboard('{Control>}n{/Control}');
+  expect(heading()).toBe('New thread');
+  await user.keyboard('{Control>}o{/Control}');
+  expect(agent.pickWorkspace).toHaveBeenCalledTimes(2);
+  await user.keyboard('{Control>},{/Control}');
+  expect(screen.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+});
+
+it('keeps focus in place when Tab is pressed', async () => {
+  const user = await open();
+  const box = screen.getByPlaceholderText('Ask the agent…');
+  await user.click(box);
+  await user.tab();
+  expect(box).toHaveFocus();
+  await user.tab({ shift: true });
+  expect(box).toHaveFocus();
+});
+
+it('cycles active threads with Ctrl+Tab, or all of them when chosen', async () => {
+  agent.listThreads.mockResolvedValue([
+    ...list,
+    { id: 'c', title: 'Oldest', createdAt: now - 3, updatedAt: now - 3 },
+  ]);
+  agent.usage.mockResolvedValue(null);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: /Oldest/ }));
+  await sendPrompt(user, 'go');
+  await user.click(screen.getByRole('button', { name: /Newest/ }));
+
+  await user.keyboard('{Control>}{Tab}{/Control}');
+  expect(heading()).toBe('Oldest');
+  await user.keyboard('{Control>}{Tab}{/Control}');
+  expect(heading()).toBe('Newest');
+  await user.keyboard('{Control>}{Shift>}{Tab}{/Shift}{/Control}');
+  expect(heading()).toBe('Oldest');
+
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Hotkeys' }));
+  await user.click(screen.getByRole('radio', { name: 'all' }));
+  await user.keyboard('{Escape}');
+  await user.keyboard('{Control>}{Shift>}{Tab}{/Shift}{/Control}');
+  expect(heading()).toBe('Older');
 });

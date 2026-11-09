@@ -52,9 +52,9 @@ describe('threads:list', () => {
       session('c', 2, { summary: 'Mid' }),
     ]);
     expect(await invoke('threads:list', '/proj')).toEqual([
-      { id: 'b', title: 'New', updatedAt: 3 },
-      { id: 'c', title: 'Mid', updatedAt: 2 },
-      { id: 'a', title: 'Old', updatedAt: 1 },
+      { id: 'b', title: 'New', createdAt: 3, updatedAt: 3 },
+      { id: 'c', title: 'Mid', createdAt: 2, updatedAt: 2 },
+      { id: 'a', title: 'Old', createdAt: 1, updatedAt: 1 },
     ]);
     expect(sdk.listSessions).toHaveBeenCalledWith({ dir: '/proj' });
   });

@@ -26,6 +26,7 @@ export interface Thread {
   id: string;
   title: string;
   cwd: string;
+  createdAt: number;
   updatedAt: number;
   // Outcome of the last run, cleared once the user has seen it.
   status?: 'attention' | 'error' | 'done';
@@ -48,15 +49,6 @@ export interface Thread {
   key?: string;
 }
 
-const order: ThreadState[] = [
-  'attention',
-  'error',
-  'done',
-  'running',
-  'draft',
-  'read',
-];
-
 export function threadState(thread: Thread, runningIds: string[]): ThreadState {
   if (thread.permissions?.length) return 'attention';
   if (runningIds.includes(thread.id)) return 'running';
@@ -65,23 +57,41 @@ export function threadState(thread: Thread, runningIds: string[]): ThreadState {
   return thread.status ?? 'read';
 }
 
-export function sortThreads(threads: Thread[], runningIds: string[]) {
-  return threads.toSorted(
-    (a, b) =>
-      Number(!!b.draft) - Number(!!a.draft) ||
-      order.indexOf(threadState(a, runningIds)) -
-        order.indexOf(threadState(b, runningIds)) ||
-      b.updatedAt - a.updatedAt,
-  );
-}
-
 export function newThread(cwd: string): Thread {
   return {
     id: crypto.randomUUID(),
     title: 'New thread',
     cwd,
+    createdAt: Date.now(),
     updatedAt: Date.now(),
     items: [],
     draft: true,
   };
+}
+
+// Manual archive choices by session id; true archives, a timestamp unarchives and lists it from then.
+export type ArchiveChoices = Record<string, true | number>;
+
+// Read threads untouched since before today are archived unless chosen by hand.
+export function listThreads(
+  threads: Thread[],
+  choices: ArchiveChoices,
+  activeId: string | undefined,
+  runningIds: string[],
+) {
+  const today = new Date().setHours(0, 0, 0, 0);
+  const archived = threads.filter(
+    (t) =>
+      !t.draft &&
+      threadState(t, runningIds) === 'read' &&
+      (t.id in choices
+        ? choices[t.id] === true
+        : t.updatedAt < today && t.id !== activeId),
+  );
+  const listedAt = (t: Thread) =>
+    Math.max(t.createdAt, Number(choices[t.id] ?? 0));
+  const current = threads
+    .filter((t) => !archived.includes(t))
+    .toSorted((a, b) => listedAt(b) - listedAt(a));
+  return { current, archived };
 }

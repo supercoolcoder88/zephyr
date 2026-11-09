@@ -47,6 +47,7 @@ const view = (
       id: 't1',
       title: 'Thread',
       cwd: '/proj',
+      createdAt: 0,
       updatedAt: 0,
       items,
       permissions,
@@ -166,6 +167,7 @@ const renderQuote = (prompt = '') => {
         id: 't1',
         title: 'Thread',
         cwd: '/proj',
+        createdAt: 0,
         updatedAt: 0,
         prompt,
         items: [
@@ -250,7 +252,13 @@ it('appends the quote after an existing draft', async () => {
 });
 
 it('shows a prompt set from outside without remounting', () => {
-  const thread = { id: 't1', title: 'Thread', cwd: '/proj', updatedAt: 0 };
+  const thread = {
+    id: 't1',
+    title: 'Thread',
+    cwd: '/proj',
+    createdAt: 0,
+    updatedAt: 0,
+  };
   const props = {
     running: false,
     justFinished: false,
@@ -293,6 +301,7 @@ it('offers stop and queueing while running', async () => {
         id: 't1',
         title: 'Thread',
         cwd: '/proj',
+        createdAt: 0,
         updatedAt: 0,
         items: [],
       }}

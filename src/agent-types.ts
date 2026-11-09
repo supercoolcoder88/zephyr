@@ -137,7 +137,9 @@ export interface AgentApi {
   onEvent(listener: (runId: string, event: AgentEvent) => void): () => void;
   listThreads(
     cwd: string,
-  ): Promise<{ id: string; title: string; updatedAt: number }[]>;
+  ): Promise<
+    { id: string; title: string; createdAt: number; updatedAt: number }[]
+  >;
   loadThread(sessionId: string, cwd: string): Promise<ThreadItem[]>;
   deleteThread(sessionId: string, cwd: string): Promise<void>;
 }

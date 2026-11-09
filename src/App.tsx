@@ -11,7 +11,12 @@ import Sidebar from "./components/sidebar/Sidebar";
 import Todos, { todoType } from "./components/todos/Todos";
 import Button from "./components/ui/Button";
 import type { Image, ModelChoice, Permission, ThreadItem } from "./agent-types";
-import { newThread, sortThreads, type Thread } from "./thread";
+import {
+  listThreads,
+  newThread,
+  type ArchiveChoices,
+  type Thread,
+} from "./thread";
 
 type Listed = Awaited<ReturnType<typeof window.agent.listThreads>>;
 
@@ -28,12 +33,13 @@ function merge(
       (t) =>
         (t.draft || running.includes(t.id)) && !list.some((l) => l.id === t.id),
     ),
-    ...list.map(({ id, title, updatedAt }) => {
+    ...list.map(({ id, title, createdAt, updatedAt }) => {
       const known = mine.find((t) => t.id === id);
       return {
         id,
         title,
         cwd,
+        createdAt,
         updatedAt,
         status: known?.status,
         items: known?.items,
@@ -56,6 +62,9 @@ export default function App() {
   const [runningIds, setRunningIds] = useState<string[]>([]);
   const [finishedId, setFinishedId] = useState<string>();
   const [deleteError, setDeleteError] = useState<string>();
+  const [choices, setChoices] = useState<ArchiveChoices>(() =>
+    JSON.parse(localStorage.getItem("archived") ?? "{}"),
+  );
   const [dragging, setDragging] = useState<boolean | "new" | "chat">(false);
   const sidebarLayout = useDefaultLayout({
     id: "sidebar",
@@ -259,11 +268,26 @@ export default function App() {
     [],
   );
 
-  const visible = sortThreads(
-    threads.filter((t) => t.cwd === workspace),
+  const visible = threads
+    .filter((t) => t.cwd === workspace)
+    .toSorted((a, b) => b.createdAt - a.createdAt);
+  const { current, archived } = listThreads(
+    visible,
+    choices,
+    activeId,
     runningIds,
   );
-  const active = visible.find((t) => t.id === activeId) ?? visible[0];
+  const active =
+    visible.find((t) => t.id === activeId) ?? current[0] ?? visible[0];
+
+  function choose(id: string, value: true | number | undefined) {
+    setChoices((prev) => {
+      const { [id]: _, ...next } = prev;
+      if (value !== undefined) next[id] = value;
+      localStorage.setItem("archived", JSON.stringify(next));
+      return next;
+    });
+  }
 
   function send(prompt: string, images: Image[], choice: ModelChoice) {
     if (!active) return;
@@ -399,9 +423,10 @@ export default function App() {
       }
     }
     setThreads((prev) => prev.filter((t) => t.id !== id));
+    choose(id, undefined);
     if (thread !== active) return;
-    const i = visible.indexOf(thread);
-    const next = visible[i + 1] ?? visible[i - 1];
+    const i = current.indexOf(thread);
+    const next = current[i + 1] ?? current[i - 1];
     if (next) return select(next);
     const fresh = newThread(thread.cwd);
     setThreads((prev) => [fresh, ...prev]);
@@ -449,7 +474,7 @@ export default function App() {
           onClick={() => openWorkspace()}
           className="chamfer px-6"
         >
-          [ OPEN PROJECT ]
+          [ OPEN FOLDER ]
         </Button>
       </main>
     );
@@ -472,7 +497,9 @@ export default function App() {
           <Sidebar
             workspace={active.cwd}
             onOpenWorkspace={() => openWorkspace()}
-            threads={visible}
+            current={current}
+            archived={archived}
+            onArchive={(id, value) => choose(id, value || Date.now())}
             activeId={active.id}
             runningIds={runningIds}
             onSelect={(id) => select(visible.find((t) => t.id === id)!)}

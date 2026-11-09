@@ -496,6 +496,7 @@ export function registerAgentIpc() {
         title: (s.customTitle || s.summary || s.firstPrompt || 'Untitled')
           .trim()
           .slice(0, 48),
+        createdAt: s.createdAt ?? s.lastModified,
         updatedAt: s.lastModified,
       }));
   });
