@@ -1,8 +1,163 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import type { ThreadItem } from '../../agent-types';
+import Button from '../ui/Button';
+
+interface Question {
+  question: string;
+  header: string;
+  options: { label: string; description: string }[];
+  multiSelect?: boolean;
+}
+
+const index = (n: number) => (
+  <span className="text-2xs leading-5 text-mute group-data-answer:text-warn">
+    {String(n + 1).padStart(2, '0')}
+  </span>
+);
+
+// Selectable while onAnswer is given; answering with nothing skips the questions.
+export function Questions({
+  input,
+  live = false,
+  onAnswer,
+}: {
+  input: unknown;
+  live?: boolean;
+  onAnswer?(answers?: Record<string, string>): void;
+}) {
+  const { questions, answers } = input as {
+    questions: Question[];
+    answers?: Record<string, string>;
+  };
+  const [picked, setPicked] = useState<string[][]>(() =>
+    questions.map(() => []),
+  );
+  const [other, setOther] = useState(() => questions.map(() => ''));
+  const reply = (i: number) =>
+    [...picked[i], other[i].trim()].filter(Boolean).join(', ');
+  const Row = onAnswer ? 'label' : 'div';
+  const row =
+    'group flex gap-3 px-2 py-1 has-checked:bg-paper has-checked:text-void has-focus-visible:outline has-focus-visible:outline-cyan has-[input]:cursor-pointer has-[input]:hover:bg-line has-checked:hover:bg-ink';
+  return (
+    <div
+      role="group"
+      aria-label="Questions"
+      className={`divide-y divide-line border bg-panel text-sm transition-colors duration-200 ease-mech ${
+        live ? 'border-cyan' : onAnswer ? 'border-line-strong' : 'border-line'
+      }`}
+    >
+      {questions.map((q, i) => {
+        // Answered options are matched back to labels; anything left was typed in.
+        const given = answers?.[q.question]?.split(', ') ?? [];
+        const typed = given
+          .filter((g) => !q.options.some((o) => o.label === g))
+          .join(', ');
+        return (
+          <fieldset key={i} className="space-y-2 px-3 py-2">
+            <legend className="contents text-2xs tracking-widest text-mute uppercase">
+              {q.header}
+            </legend>
+            <p className="break-words">{q.question}</p>
+            <ol className="-mx-2 space-y-1">
+              {q.options.map((o, j) => (
+                <li key={j}>
+                  <Row
+                    data-answer={given.includes(o.label) || undefined}
+                    className={row}
+                  >
+                    {onAnswer && (
+                      <input
+                        type={q.multiSelect ? 'checkbox' : 'radio'}
+                        name={`q${i}`}
+                        className="sr-only"
+                        checked={picked[i].includes(o.label)}
+                        onChange={(e) => {
+                          setPicked(
+                            picked.with(
+                              i,
+                              !q.multiSelect
+                                ? [o.label]
+                                : e.target.checked
+                                  ? [...picked[i], o.label]
+                                  : picked[i].filter((l) => l !== o.label),
+                            ),
+                          );
+                          if (!q.multiSelect) setOther(other.with(i, ''));
+                        }}
+                      />
+                    )}
+                    {index(j)}
+                    <span className="min-w-0 break-words group-data-answer:text-warn">
+                      {o.label}
+                      <span className="block text-2xs text-mute">
+                        {o.description}
+                      </span>
+                    </span>
+                  </Row>
+                </li>
+              ))}
+              {onAnswer ? (
+                <li>
+                  <label
+                    className={`${row} has-[input:not(:placeholder-shown)]:bg-paper has-[input:not(:placeholder-shown)]:text-void`}
+                  >
+                    {index(q.options.length)}
+                    <input
+                      type="text"
+                      aria-label="Other"
+                      placeholder="Other…"
+                      value={other[i]}
+                      onChange={(e) => {
+                        setOther(other.with(i, e.target.value));
+                        if (!q.multiSelect && e.target.value)
+                          setPicked(picked.with(i, []));
+                      }}
+                      className="min-w-0 flex-1 bg-transparent placeholder:text-mute focus-visible:outline-none"
+                    />
+                  </label>
+                </li>
+              ) : (
+                typed && (
+                  <li data-answer className="group flex gap-3 px-2 py-1">
+                    {index(q.options.length)}
+                    <span className="min-w-0 break-words text-warn">
+                      {typed}
+                    </span>
+                  </li>
+                )
+              )}
+            </ol>
+          </fieldset>
+        );
+      })}
+      {onAnswer && (
+        <div className="flex justify-end gap-2 px-3 py-2">
+          <Button variant="destructive" size="md" onClick={() => onAnswer()}>
+            [ SKIP ]
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            disabled={questions.some((_, i) => !reply(i))}
+            onClick={() =>
+              onAnswer(
+                Object.fromEntries(
+                  questions.map((q, i) => [q.question, reply(i)]),
+                ),
+              )
+            }
+          >
+            [ SUBMIT ]
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function summarize(input: unknown) {
   const fields = input as Record<string, unknown> | null;
@@ -58,7 +213,7 @@ export default memo(function Item({
           }`}
         >
           <Markdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkBreaks]}
             rehypePlugins={[rehypeHighlight]}
             components={{
               a: (props) => <a {...props} target="_blank" />,
@@ -74,6 +229,8 @@ export default memo(function Item({
         </div>
       );
     case 'tool':
+      if (item.name === 'AskUserQuestion')
+        return <Questions input={item.input} live={live} />;
       return (
         <p className="flex gap-2 border-l border-transparent pl-3 text-2xs text-mute">
           <span className={`shrink-0 ${live ? 'text-cyan' : ''}`}>

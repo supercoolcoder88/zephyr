@@ -174,6 +174,15 @@ async function sendPrompt(user: User, text: string) {
   );
 }
 
+it('opens the folder it was launched with, skipping the picker', async () => {
+  history.replaceState(null, '', '?workspace=%2Flaunched');
+  render(<App />);
+  await screen.findByRole('navigation');
+  expect(agent.pickWorkspace).not.toHaveBeenCalled();
+  expect(agent.listThreads).toHaveBeenCalledWith('/launched');
+  history.replaceState(null, '', '/');
+});
+
 it('lists sessions on open and loads the newest', async () => {
   agent.listThreads.mockResolvedValue(list);
   agent.loadThread.mockResolvedValue([
@@ -856,6 +865,35 @@ it('shows a tool call as one quiet line', async () => {
   expect(line.textContent).not.toMatch(/[{}]|more/);
 });
 
+it("shows the agent's questions and options in a box that stays after the run", async () => {
+  await running();
+  act(() =>
+    emit({
+      type: 'tool',
+      id: 'tu',
+      name: 'AskUserQuestion',
+      input: {
+        questions: [
+          {
+            question: 'How should a test open a workspace?',
+            header: 'Workspace',
+            multiSelect: false,
+            options: [
+              { label: 'Env var override', description: 'Skip the dialog.' },
+              { label: 'Main-process inspector', description: 'Patch main.' },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  act(() => emit({ type: 'done', ok: true, result: '' }));
+  const box = screen.getByRole('group', { name: 'Questions' });
+  expect(box).toHaveTextContent('How should a test open a workspace?');
+  expect(box).toHaveTextContent('01Env var overrideSkip the dialog.');
+  expect(box).toHaveTextContent('02Main-process inspector');
+});
+
 it.each([
   ['Read', { file_path: '/src/a.ts' }, 'read', '/src/a.ts'],
   ['Grep', { pattern: 'foo.*bar' }, 'grep', 'foo.*bar'],
@@ -1189,13 +1227,111 @@ it('defaults to auto mode and switches mode from the sidebar', async () => {
 const permissionCards = () =>
   screen.queryAllByRole('group', { name: 'Permission request' });
 
+it('answers a pending question with the picked options instead of allow or deny', async () => {
+  const user = await running();
+  const runId = lastRunId();
+  const input = {
+    questions: [
+      {
+        question: 'Which workspace?',
+        header: 'Workspace',
+        multiSelect: false,
+        options: [
+          { label: 'Env var', description: 'Skip the dialog.' },
+          { label: 'Inspector', description: 'Patch main.' },
+        ],
+      },
+      {
+        question: 'Which suites?',
+        header: 'Scope',
+        multiSelect: true,
+        options: [
+          { label: 'CLI', description: '' },
+          { label: 'Vitest', description: '' },
+        ],
+      },
+    ],
+  };
+  act(() => emit({ type: 'tool', id: 'tu', name: 'AskUserQuestion', input }));
+  act(() =>
+    emit({
+      type: 'permission',
+      request: { id: 'r1', toolUseId: 'tu', tool: 'AskUserQuestion', input },
+    }),
+  );
+  expect(permissionCards()).toHaveLength(0);
+  const [box] = screen.getAllByRole('group', { name: 'Questions' });
+  const submit = within(box).getByRole('button', { name: '[ SUBMIT ]' });
+  const [ownWay, otherSuite] = within(box).getAllByRole('textbox', {
+    name: 'Other',
+  });
+  await user.click(within(box).getByRole('radio', { name: /Inspector/ }));
+  expect(submit).toBeDisabled();
+  await user.type(ownWay, 'My own way');
+  expect(
+    within(box).getByRole('radio', { name: /Inspector/ }),
+  ).not.toBeChecked();
+  await user.click(within(box).getByRole('checkbox', { name: /CLI/ }));
+  await user.type(otherSuite, 'Playwright');
+  await user.click(submit);
+  const answers = {
+    'Which workspace?': 'My own way',
+    'Which suites?': 'CLI, Playwright',
+  };
+  expect(agent.answerPermission).toHaveBeenCalledWith(
+    runId,
+    'r1',
+    true,
+    answers,
+  );
+  expect(screen.getAllByRole('group', { name: 'Questions' })).toHaveLength(1);
+  expect(screen.queryByRole('radio')).toBeNull();
+
+  act(() => emit({ type: 'answers', id: 'tu', answers }));
+  const answered = screen.getByRole('group', { name: 'Questions' });
+  expect(
+    [...answered.querySelectorAll('[data-answer]')].map((e) => e.textContent),
+  ).toEqual(['03My own way', '01CLI', '03Playwright']);
+});
+
+it('skips a pending question by denying it', async () => {
+  const user = await running();
+  const input = {
+    questions: [
+      {
+        question: 'Which?',
+        header: 'Pick',
+        options: [{ label: 'A', description: '' }],
+      },
+    ],
+  };
+  act(() =>
+    emit({
+      type: 'permission',
+      request: { id: 'r1', toolUseId: 'tu', tool: 'AskUserQuestion', input },
+    }),
+  );
+  await user.click(screen.getByRole('button', { name: '[ SKIP ]' }));
+  expect(agent.answerPermission).toHaveBeenCalledWith(
+    lastRunId(),
+    'r1',
+    false,
+    undefined,
+  );
+});
+
 it('asks to allow a tool call and sends the answer', async () => {
   const user = await running();
   const runId = lastRunId();
   act(() =>
     emit({
       type: 'permission',
-      request: { id: 'r1', tool: 'Bash', input: { command: 'rm -rf x\nmore' } },
+      request: {
+        id: 'r1',
+        toolUseId: 'tr1',
+        tool: 'Bash',
+        input: { command: 'rm -rf x\nmore' },
+      },
     }),
   );
   const [card] = permissionCards();
@@ -1203,7 +1339,12 @@ it('asks to allow a tool call and sends the answer', async () => {
   expect(card).toHaveTextContent('rm -rf x');
   expect(card.textContent).not.toMatch(/more/);
   await user.click(within(card).getByRole('button', { name: '[ ALLOW ]' }));
-  expect(agent.answerPermission).toHaveBeenCalledWith(runId, 'r1', true);
+  expect(agent.answerPermission).toHaveBeenCalledWith(
+    runId,
+    'r1',
+    true,
+    undefined,
+  );
   expect(permissionCards()).toHaveLength(0);
 
   act(() =>
@@ -1211,6 +1352,7 @@ it('asks to allow a tool call and sends the answer', async () => {
       type: 'permission',
       request: {
         id: 'r2',
+        toolUseId: 'tr2',
         tool: 'Write',
         input: { file_path: '/src/a.ts' },
         title: 'Claude wants to write to a.ts',
@@ -1222,7 +1364,12 @@ it('asks to allow a tool call and sends the answer', async () => {
   expect(titled).toHaveTextContent('Claude wants to write to a.ts');
   expect(titled).not.toHaveTextContent('/src/a.ts');
   await user.click(within(titled).getByRole('button', { name: '[ DENY ]' }));
-  expect(agent.answerPermission).toHaveBeenLastCalledWith(runId, 'r2', false);
+  expect(agent.answerPermission).toHaveBeenLastCalledWith(
+    runId,
+    'r2',
+    false,
+    undefined,
+  );
   expect(permissionCards()).toHaveLength(0);
 });
 
@@ -1236,19 +1383,34 @@ it.each([
     act(() =>
       emit({
         type: 'permission',
-        request: { id: 'r1', tool: 'Bash', input: { command: 'ls' } },
+        request: {
+          id: 'r1',
+          toolUseId: 'tr1',
+          tool: 'Bash',
+          input: { command: 'ls' },
+        },
       }),
     );
     act(() =>
       emit({
         type: 'permission',
-        request: { id: 'r2', tool: 'Read', input: { file_path: '/x' } },
+        request: {
+          id: 'r2',
+          toolUseId: 'tr2',
+          tool: 'Read',
+          input: { file_path: '/x' },
+        },
       }),
     );
     act(() =>
       emit({
         type: 'permission',
-        request: { id: 'r3', tool: 'Grep', input: { pattern: 'y' } },
+        request: {
+          id: 'r3',
+          toolUseId: 'tr3',
+          tool: 'Grep',
+          input: { pattern: 'y' },
+        },
       }),
     );
     expect(permissionCards().map((c) => c.textContent)).toEqual([
@@ -1275,7 +1437,12 @@ it('marks a thread as waiting while a tool call needs permission', async () => {
   act(() =>
     emit({
       type: 'permission',
-      request: { id: 'r1', tool: 'Bash', input: { command: 'ls' } },
+      request: {
+        id: 'r1',
+        toolUseId: 'tr1',
+        tool: 'Bash',
+        input: { command: 'ls' },
+      },
     }),
   );
   expect(dot()).toBe('attention');
@@ -1348,7 +1515,12 @@ it('keeps a pending permission when another thread finishes', async () => {
   act(() =>
     emit({
       type: 'permission',
-      request: { id: 'r1', tool: 'Bash', input: { command: 'ls' } },
+      request: {
+        id: 'r1',
+        toolUseId: 'tr1',
+        tool: 'Bash',
+        input: { command: 'ls' },
+      },
     }),
   );
   await user.click(screen.getByRole('button', { name: /Older/ }));
@@ -1357,7 +1529,12 @@ it('keeps a pending permission when another thread finishes', async () => {
   await user.click(screen.getByRole('button', { name: /Newest/ }));
   expect(permissionCards()).toHaveLength(1);
   await user.click(screen.getByRole('button', { name: '[ ALLOW ]' }));
-  expect(agent.answerPermission).toHaveBeenCalledWith(runB, 'r1', true);
+  expect(agent.answerPermission).toHaveBeenCalledWith(
+    runB,
+    'r1',
+    true,
+    undefined,
+  );
 });
 
 it('hides the working wave while waiting for permission', async () => {
@@ -1367,7 +1544,12 @@ it('hides the working wave while waiting for permission', async () => {
   act(() =>
     emit({
       type: 'permission',
-      request: { id: 'r1', tool: 'Bash', input: { command: 'ls' } },
+      request: {
+        id: 'r1',
+        toolUseId: 'tr1',
+        tool: 'Bash',
+        input: { command: 'ls' },
+      },
     }),
   );
   expect(wave()).toBeNull();

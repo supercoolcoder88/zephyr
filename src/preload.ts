@@ -18,8 +18,8 @@ const agent: AgentApi = {
     ),
   setPermission: (runId, permission) =>
     ipcRenderer.invoke('agent:set-permission', runId, permission),
-  answerPermission: (runId, id, allow) =>
-    ipcRenderer.invoke('agent:permission-answer', runId, id, allow),
+  answerPermission: (runId, id, allow, answers) =>
+    ipcRenderer.invoke('agent:permission-answer', runId, id, allow, answers),
   pickWorkspace: () => ipcRenderer.invoke('workspace:pick'),
   paths: (cwd, candidates) =>
     ipcRenderer.invoke('workspace:paths', cwd, candidates),

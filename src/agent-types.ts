@@ -19,6 +19,8 @@ export type AgentEvent =
   | { type: 'subthread-end'; id: string; ok: boolean }
   | { type: 'permission'; request: PermissionRequest }
   | { type: 'permission-end'; id: string }
+  // The user's answers to the AskUserQuestion call with this tool_use id.
+  | { type: 'answers'; id: string; answers: Record<string, string> }
   // Percent of the context window in use after the last turn.
   | { type: 'context'; percentage: number };
 
@@ -35,6 +37,7 @@ export interface PermissionRequest {
   tool: string;
   input: unknown;
   title?: string;
+  toolUseId: string;
 }
 
 export interface Image {
@@ -53,6 +56,7 @@ export type ThreadItem =
           | 'picked'
           | 'end'
           | 'context'
+          | 'answers'
           | `subthread${string}`
           | `permission${string}`;
       }
@@ -109,7 +113,13 @@ export interface AgentApi {
     uuid: string,
   ): Promise<void>;
   setPermission(runId: string, permission: Permission): Promise<void>;
-  answerPermission(runId: string, id: string, allow: boolean): Promise<void>;
+  // Answers, keyed by question text, allow an AskUserQuestion call with the user's choices.
+  answerPermission(
+    runId: string,
+    id: string,
+    allow: boolean,
+    answers?: Record<string, string>,
+  ): Promise<void>;
   pickWorkspace(): Promise<string | undefined>;
   // Which of the paths, relative to cwd, exist.
   paths(

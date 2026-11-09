@@ -9,6 +9,12 @@ if (started) {
   app.quit();
 }
 
+// `zephyr <dir>` passes the folder to open; dev runs carry the app path first.
+const launchDir = process.argv
+  .slice(app.isPackaged ? 1 : 2)
+  .find((arg) => !arg.startsWith('-'));
+const query = launchDir ? { workspace: path.resolve(launchDir) } : undefined;
+
 const createWindow = () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
@@ -26,10 +32,13 @@ const createWindow = () => {
 
   // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    mainWindow.loadURL(
+      `${MAIN_WINDOW_VITE_DEV_SERVER_URL}?${new URLSearchParams(query)}`,
+    );
   } else {
     mainWindow.loadFile(
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
+      { query },
     );
   }
 

@@ -142,6 +142,39 @@ describe('threads:load', () => {
       dir: '/proj',
     });
   });
+
+  it('restores answers to questions from the stored result text', async () => {
+    const input = {
+      questions: [{ question: 'Theme?' }, { question: 'Features?' }],
+    };
+    sdk.getSessionMessages.mockResolvedValue([
+      message('assistant', [
+        { type: 'tool_use', id: 'q', name: 'AskUserQuestion', input },
+      ]),
+      message('user', [
+        {
+          type: 'tool_result',
+          tool_use_id: 'q',
+          content:
+            'The user answered: "Theme?"="Dark", "Features?"="Caching, Rust, obviously". Read the answers carefully.',
+        },
+      ]),
+    ]);
+    expect(await invoke('threads:load', 'sid', '/proj')).toEqual([
+      {
+        type: 'tool',
+        id: 'q',
+        name: 'AskUserQuestion',
+        input: {
+          ...input,
+          answers: {
+            'Theme?': 'Dark',
+            'Features?': 'Caching, Rust, obviously',
+          },
+        },
+      },
+    ]);
+  });
 });
 
 describe('threads:delete', () => {
@@ -331,8 +364,13 @@ describe('agent:send', () => {
       { type: 'system', subtype: 'init', session_id: 'sid' },
       { type: 'system', subtype: 'session_state_changed', state: 'running' },
       {
+        type: 'user',
+        isReplay: true,
+        parent_tool_use_id: null,
+        uuid: 'uuid-go',
+      },
+      {
         type: 'assistant',
-        user_message_uuids: ['uuid-go'],
         message: {
           content: [
             { type: 'text', text: 'hi' },
@@ -359,6 +397,7 @@ describe('agent:send', () => {
         parent_tool_use_id: 't',
         message: { content: [{ type: 'text', text: 'from subagent' }] },
       },
+      { type: 'user', isReplay: true, parent_tool_use_id: 't', uuid: 'sub' },
       {
         type: 'system',
         subtype: 'task_notification',
@@ -370,14 +409,15 @@ describe('agent:send', () => {
         subtype: 'success',
         is_error: false,
         result: 'ok',
-        user_message_uuid: 'uuid-go',
       },
       { type: 'system', subtype: 'session_state_changed', state: 'idle' },
     ])
       q.step({ value });
-    await vi.waitFor(() => expect(s.sent).toHaveLength(12));
+    await vi.waitFor(() => expect(s.sent).toHaveLength(11));
     expect(s.sent).toContainEqual(['s4', { type: 'context', percentage: 12 }]);
-    expect(s.sent.filter(([, e]) => (e as { type: string }).type !== 'context')).toEqual([
+    expect(
+      s.sent.filter(([, e]) => (e as { type: string }).type !== 'context'),
+    ).toEqual([
       ['s4', { type: 'session', sessionId: 'sid' }],
       ['s4', { type: 'state', state: 'running' }],
       ['s4', { type: 'picked', ids: ['uuid-go'] }],
@@ -393,10 +433,29 @@ describe('agent:send', () => {
         },
       ],
       ['s4', { type: 'subthread-end', id: 't', ok: true }],
-      ['s4', { type: 'picked', ids: ['uuid-go'] }],
       ['s4', { type: 'done', ok: true, result: 'ok' }],
       ['s4', { type: 'state', state: 'idle' }],
     ]);
+  });
+
+  it("forwards the user's answers to a question", async () => {
+    const s = sender();
+    await send(s, 's8', 'go');
+    const answers = { 'Which?': 'Left, of course' };
+    lastQuery().step({
+      value: {
+        type: 'user',
+        parent_tool_use_id: null,
+        message: { content: [{ type: 'tool_result', tool_use_id: 'q' }] },
+        tool_use_result: { questions: [], answers },
+      },
+    });
+    await vi.waitFor(() =>
+      expect(s.sent).toContainEqual([
+        's8',
+        { type: 'answers', id: 'q', answers },
+      ]),
+    );
   });
 
   it.each([
@@ -462,8 +521,12 @@ describe('agent:send', () => {
     );
     return { controller, result };
   };
-  const answer = (runId: string, id: string, allow: boolean) =>
-    handlers.get('agent:permission-answer')!({}, runId, id, allow);
+  const answer = (
+    runId: string,
+    id: string,
+    allow: boolean,
+    answers?: Record<string, string>,
+  ) => handlers.get('agent:permission-answer')!({}, runId, id, allow, answers);
 
   it('asks the renderer before a tool call and resolves with its answer', async () => {
     const s = sender();
@@ -480,6 +543,7 @@ describe('agent:send', () => {
             tool: 'Bash',
             input,
             title: 'Claude wants to run ls',
+            toolUseId: 'tool-r1',
           },
         },
       ],
@@ -498,6 +562,17 @@ describe('agent:send', () => {
       message: 'The user denied this tool call.',
     });
     expect(s.sent.at(-1)).toEqual(['p3', { type: 'permission-end', id: 'r2' }]);
+  });
+
+  it("allows a question with the user's answers added to its input", async () => {
+    await send(sender(), 'p6', 'a');
+    const input = { questions: [{ question: 'Which?' }] };
+    const asked = ask(input, 'r1');
+    await answer('p6', 'r1', true, { 'Which?': 'Left' });
+    await expect(asked.result).resolves.toEqual({
+      behavior: 'allow',
+      updatedInput: { ...input, answers: { 'Which?': 'Left' } },
+    });
   });
 
   it('denies a pending tool call when it is aborted or the session closes', async () => {

@@ -56,11 +56,14 @@ function options(cwd: string): Options {
     permissionMode: 'default',
     // Lets a session switch to bypassPermissions later.
     allowDangerouslySkipPermissions: true,
+    extraArgs: { 'replay-user-messages': null },
   };
 }
 
 const IDLE_MS = 10 * 60_000;
 const MAX_SESSIONS = 4;
+
+type Answer = (allow: boolean, answers?: Record<string, string>) => void;
 
 // One long-lived query per thread, keyed by a renderer-chosen run id.
 const sessions = new Map<
@@ -74,7 +77,7 @@ const sessions = new Map<
     effort?: Effort;
     permission: Permission;
     setPermission(permission: Permission): Promise<void>;
-    answers: Map<string, (allow: boolean) => void>;
+    answers: Map<string, Answer>;
     idle: boolean;
     lastUsed: number;
     busy(): void;
@@ -95,19 +98,6 @@ function blockEvents(content: AssistantContent) {
         ? [{ type: 'tool', id: block.id, name: block.name, input: block.input }]
         : [],
   );
-}
-
-function sendPicked(
-  target: WebContents,
-  runId: string,
-  {
-    user_message_uuid,
-    user_message_uuids,
-  }: { user_message_uuid?: string; user_message_uuids?: string[] },
-) {
-  const ids =
-    user_message_uuids ?? (user_message_uuid ? [user_message_uuid] : []);
-  if (ids.length) send(target, runId, { type: 'picked', ids });
 }
 
 function forward(target: WebContents, runId: string, message: SDKMessage) {
@@ -140,7 +130,6 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
       break;
     case 'assistant': {
       const id = message.parent_tool_use_id;
-      if (!id) sendPicked(target, runId, message);
       for (const output of blockEvents(message.message.content)) {
         send(
           target,
@@ -150,8 +139,29 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
       }
       break;
     }
+    case 'user': {
+      // Replays land where the CLI consumed the message, including mid-turn folds.
+      if (
+        'isReplay' in message &&
+        message.isReplay &&
+        !message.parent_tool_use_id
+      )
+        send(target, runId, { type: 'picked', ids: [message.uuid] });
+      const block = Array.isArray(message.message?.content)
+        ? message.message.content[0]
+        : undefined;
+      const result = message.tool_use_result as
+        | { answers?: Record<string, string> }
+        | undefined;
+      if (block?.type === 'tool_result' && result?.answers)
+        send(target, runId, {
+          type: 'answers',
+          id: block.tool_use_id,
+          answers: result.answers,
+        });
+      break;
+    }
     case 'result':
-      sendPicked(target, runId, message);
       send(target, runId, {
         type: 'done',
         ok: message.subtype === 'success' && !message.is_error,
@@ -160,6 +170,26 @@ function forward(target: WebContents, runId: string, message: SDKMessage) {
       });
       break;
   }
+}
+
+// Saved sessions keep answers only as the text the model read: "Q1"="A1", "Q2"="A2". ...
+function storedAnswers(input: unknown, text: string) {
+  const qs = (input as { questions: { question: string }[] }).questions;
+  const at = (q: string) => {
+    const i = text.indexOf(`"${q}"="`);
+    return i < 0 ? i : i + q.length + 4;
+  };
+  return Object.fromEntries(
+    qs.flatMap(({ question }, k) => {
+      const start = at(question);
+      const next =
+        qs[k + 1] && text.indexOf(`", "${qs[k + 1].question}"="`, start);
+      const end = next && next > 0 ? next : text.lastIndexOf('". ');
+      return start < 0 || end < start
+        ? []
+        : [[question, text.slice(start, end)]];
+    }),
+  );
 }
 
 // Skills and usage only come from a live CLI, so start one that never gets a prompt.
@@ -236,7 +266,7 @@ export function registerAgentIpc() {
       let wake = () => {};
       let closed = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const answers = new Map<string, (allow: boolean) => void>();
+      const answers = new Map<string, Answer>();
       const q = query({
         prompt: (async function* () {
           while (!closed) {
@@ -251,15 +281,20 @@ export function registerAgentIpc() {
           model,
           effort,
           permissionMode: permission,
-          canUseTool: (tool, input, { signal, requestId, title }) =>
+          canUseTool: (tool, input, { signal, requestId, title, toolUseID }) =>
             new Promise((resolve) => {
               session.busy();
-              answers.set(requestId, (allow) => {
+              answers.set(requestId, (allow, given) => {
                 if (!answers.delete(requestId)) return;
                 send(target, runId, { type: 'permission-end', id: requestId });
                 resolve(
                   allow
-                    ? { behavior: 'allow', updatedInput: input }
+                    ? {
+                        behavior: 'allow',
+                        updatedInput: given
+                          ? { ...input, answers: given }
+                          : input,
+                      }
                     : {
                         behavior: 'deny',
                         message: 'The user denied this tool call.',
@@ -271,7 +306,13 @@ export function registerAgentIpc() {
               );
               send(target, runId, {
                 type: 'permission',
-                request: { id: requestId, tool, input, title },
+                request: {
+                  id: requestId,
+                  tool,
+                  input,
+                  title,
+                  toolUseId: toolUseID,
+                },
               });
             }),
           env: { ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' },
@@ -370,12 +411,20 @@ export function registerAgentIpc() {
 
   ipcMain.handle(
     'agent:permission-answer',
-    (_, runId: string, id: string, allow: boolean) => {
-      sessions.get(runId)?.answers.get(id)?.(allow);
+    (
+      _,
+      runId: string,
+      id: string,
+      allow: boolean,
+      answers?: Record<string, string>,
+    ) => {
+      sessions.get(runId)?.answers.get(id)?.(allow, answers);
     },
   );
 
   ipcMain.handle('workspace:pick', async (ipcEvent) => {
+    // Headless UI review (scripts/ui.mjs) can't click a native dialog.
+    if (process.env.ZEPHYR_WORKSPACE) return process.env.ZEPHYR_WORKSPACE;
     const { filePaths } = await dialog.showOpenDialog(
       BrowserWindow.fromWebContents(ipcEvent.sender)!,
       { properties: ['openDirectory'] },
@@ -468,6 +517,8 @@ export function registerAgentIpc() {
             | {
                 type: string;
                 text?: string;
+                tool_use_id?: string;
+                content?: unknown;
                 source?: {
                   type: string;
                   media_type: Image['mediaType'];
@@ -485,6 +536,21 @@ export function registerAgentIpc() {
             ? [{ mediaType: b.source.media_type, data: b.source.data }]
             : [],
         );
+        for (const b of blocks) {
+          const asked = items.find(
+            (i) => i.type === 'tool' && i.id === b.tool_use_id,
+          );
+          if (
+            b.type === 'tool_result' &&
+            asked?.type === 'tool' &&
+            asked.name === 'AskUserQuestion' &&
+            typeof b.content === 'string'
+          )
+            asked.input = {
+              ...(asked.input as object),
+              answers: storedAnswers(asked.input, b.content),
+            };
+        }
         if (texts.length || images.length) {
           items.push({
             type: 'user',

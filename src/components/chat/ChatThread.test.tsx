@@ -67,6 +67,12 @@ const renderItems = (items: ThreadItem[], running = false) =>
 
 const renderText = (text: string) => renderItems([{ type: 'text', text }]);
 
+it('keeps single line breaks in agent output', () => {
+  const p = renderText('Teal\nChips').querySelector('.markdown p')!;
+  expect(p.querySelector('br')).not.toBeNull();
+  expect(p).toHaveTextContent('Teal Chips');
+});
+
 it('highlights fenced code blocks with a language', () => {
   const container = renderText('```ts\nconst x = 1;\n```');
   const code = container.querySelector('pre > code')!;
@@ -320,7 +326,9 @@ it('scrolls a new permission card into view when pinned to the bottom', () => {
   const scroller = container.querySelector<HTMLElement>('.overflow-y-auto')!;
   Object.defineProperty(scroller, 'scrollHeight', { value: 500 });
   rerender(
-    view(items, true, [{ id: 'r1', tool: 'Bash', input: { command: 'ls' } }]),
+    view(items, true, [
+      { id: 'r1', toolUseId: 'tr1', tool: 'Bash', input: { command: 'ls' } },
+    ]),
   );
   expect(
     screen.getByRole('group', { name: 'Permission request' }),

@@ -10,7 +10,7 @@ import { flushSync } from 'react-dom';
 import type { Image, ModelChoice, ThreadItem } from '../../agent-types';
 import { stateDot, type Thread } from '../../thread';
 import Composer from '../composer/Composer';
-import Item, { summarize } from './Item';
+import Item, { Questions, summarize } from './Item';
 import SubthreadDialog from './SubthreadDialog';
 import Button from '../ui/Button';
 
@@ -24,7 +24,7 @@ interface Props {
   onCancel(): void;
   onPrompt(text: string): void;
   onImages(update: (images: Image[]) => Image[]): void;
-  onAnswer(id: string, allow: boolean): void;
+  onAnswer(id: string, allow: boolean, answers?: Record<string, string>): void;
   composer: RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -51,6 +51,10 @@ export default function ChatThread({
   const items = thread.items ?? [];
   const turns = groupTurns(items);
   const permissions = thread.permissions ?? [];
+  // A pending question is answered below the transcript, so its call isn't shown twice.
+  const asking = permissions.flatMap((p) =>
+    p.tool === 'AskUserQuestion' ? [p.toolUseId] : [],
+  );
   const subthreads = thread.subthreads ?? [];
   const viewed = subthreads.find((s) => s.id === viewing);
 
@@ -131,7 +135,7 @@ export default function ChatThread({
                 if (item.type !== 'tool')
                   return item.type !== 'text' || i > lastTool || afterAgent;
                 afterAgent = item.name === 'Agent' || item.name === 'Task';
-                return false;
+                return item.name === 'AskUserQuestion';
               });
               const hidden = collapsed ? kept.filter((k) => !k).length : 0;
               const open = expanded.includes(t);
@@ -146,7 +150,8 @@ export default function ChatThread({
                 >
                   {turn.map(
                     (item, i) =>
-                      (!hidden || open || kept[i]) && (
+                      (!hidden || open || kept[i]) &&
+                      !(item.type === 'tool' && asking.includes(item.id)) && (
                         <Item
                           key={i}
                           item={item}
@@ -204,39 +209,49 @@ export default function ChatThread({
               </div>
             ))}
             {running && !permissions.length && <Wave />}
-            {permissions.map((request) => (
-              <div
-                key={request.id}
-                role="group"
-                aria-label="Permission request"
-                className="flex items-start gap-4 border border-line-strong bg-panel px-3 py-2"
-              >
-                <div className="min-w-0 flex-1 space-y-1">
-                  <p className="text-2xs tracking-widest text-mute uppercase">
-                    {request.tool}
-                  </p>
-                  <p className="text-sm break-words">
-                    {request.title ?? summarize(request.input)}
-                  </p>
+            {permissions.map((request) =>
+              request.tool === 'AskUserQuestion' ? (
+                <Questions
+                  key={request.id}
+                  input={request.input}
+                  onAnswer={(answers) =>
+                    onAnswer(request.id, !!answers, answers)
+                  }
+                />
+              ) : (
+                <div
+                  key={request.id}
+                  role="group"
+                  aria-label="Permission request"
+                  className="flex items-start gap-4 border border-line-strong bg-panel px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="text-2xs tracking-widest text-mute uppercase">
+                      {request.tool}
+                    </p>
+                    <p className="text-sm break-words">
+                      {request.title ?? summarize(request.input)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      variant="primary"
+                      size="md"
+                      onClick={() => onAnswer(request.id, true)}
+                    >
+                      [ ALLOW ]
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="md"
+                      onClick={() => onAnswer(request.id, false)}
+                    >
+                      [ DENY ]
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 gap-2">
-                  <Button
-                    variant="primary"
-                    size="md"
-                    onClick={() => onAnswer(request.id, true)}
-                  >
-                    [ ALLOW ]
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="md"
-                    onClick={() => onAnswer(request.id, false)}
-                  >
-                    [ DENY ]
-                  </Button>
-                </div>
-              </div>
-            ))}
+              ),
+            )}
           </div>
         )}
       </div>

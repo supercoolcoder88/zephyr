@@ -8,28 +8,29 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 
 ## Palette
 
-| Token         | Value       | Use                                            |
-| ------------- | ----------- | ---------------------------------------------- |
-| `void`        | `#0E0E0E`   | App background                                 |
-| `panel`       | `#161616`   | Raised surfaces (sidebar, composer)            |
-| `line`        | `#262626`   | 1px hairlines, dividers, grid                  |
-| `line-strong` | `#404040`   | Hover and active borders                       |
-| `mute`        | `#737373`   | Secondary text, indices, metadata              |
-| `ink`         | `#EDEDED`   | Primary text                                   |
-| `paper`       | `#FFFFFF`   | Inverted blocks, primary button                |
-| `cyan`        | `#00E5FF`   | Key moments only                               |
-| `cyan-deep`   | `#0066FF`   | Glow falloff behind cyan                       |
-| `blue`        | `#61AFEF`   | Bold text in agent output only                 |
-| `alert`       | `#FF2E4D`   | Errors and destructive actions, just as sparse |
-| `ok`          | `#00E676`   | Thread status dot: finished, unseen            |
-| `warn`        | `#FF9100`   | Thread status dot: needs attention             |
-| `draft`       | `#FFD600`   | Thread status dot: unsent draft with text      |
-| `command`     | code-purple | Valid slash command in the composer            |
-| `file`        | code-green  | Existing file path in the composer             |
-| `folder`      | code-yellow | Existing folder path in the composer           |
+| Token         | Value       | Use                                              |
+| ------------- | ----------- | ------------------------------------------------ |
+| `void`        | `#0E0E0E`   | App background                                   |
+| `panel`       | `#161616`   | Raised surfaces (sidebar, composer)              |
+| `line`        | `#262626`   | 1px hairlines, dividers, grid                    |
+| `line-strong` | `#404040`   | Hover and active borders                         |
+| `mute`        | `#737373`   | Secondary text, indices, metadata                |
+| `ink`         | `#EDEDED`   | Primary text                                     |
+| `paper`       | `#FFFFFF`   | Inverted blocks, primary button                  |
+| `cyan`        | `#00E5FF`   | Key moments only                                 |
+| `cyan-deep`   | `#0066FF`   | Glow falloff behind cyan                         |
+| `blue`        | `#61AFEF`   | Bold text in agent output only                   |
+| `alert`       | `#FF2E4D`   | Errors and destructive actions, just as sparse   |
+| `ok`          | `#00E676`   | Thread status dot: finished, unseen              |
+| `warn`        | `#FF9100`   | Needs-attention dot; the user's question answers |
+| `draft`       | `#FFD600`   | Thread status dot: unsent draft with text        |
+| `command`     | code-purple | Valid slash command in the composer              |
+| `file`        | code-green  | Existing file path in the composer               |
+| `folder`      | code-yellow | Existing folder path in the composer             |
 
 - Light (`<html data-theme="light">`) and cyber (`data-theme="cyber"`, dark navy with white text) modes redefine these tokens in `src/index.css`; components never branch on theme.
-- Thread and subthread status dots are the only place `ok`, `warn` and `draft` appear: cyan running, `alert` error, `ok` done, `warn` needs attention, `draft` unsent draft with text, `mute` read.
+- `warn` also marks the user's own answers in an answered question box (chosen option labels and typed "Other" text).
+- Otherwise thread and subthread status dots are the only place `ok`, `warn` and `draft` appear: cyan running, `alert` error, `ok` done, `warn` needs attention, `draft` unsent draft with text, `mute` read.
 - `command`, `file` and `folder` colour only the matching text in the composer, so the user can see a command or path resolved before sending.
 - Emphasis is done by **inversion** (`bg-paper text-void`), not by adding colour.
 - Never set long text in cyan. Cyan marks things like rules, outlines, cursors and short status words.

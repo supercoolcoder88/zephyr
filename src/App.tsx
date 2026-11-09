@@ -1,11 +1,17 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react';
-import { flushSync } from 'react-dom';
-import ChatThread from './components/chat/ChatThread';
-import Sidebar from './components/sidebar/Sidebar';
-import Todos, { todoType } from './components/todos/Todos';
-import Button from './components/ui/Button';
-import type { Image, ModelChoice, Permission, ThreadItem } from './agent-types';
-import { newThread, sortThreads, type Thread } from './thread';
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import { flushSync } from "react-dom";
+import {
+  Group,
+  Panel,
+  Separator,
+  useDefaultLayout,
+} from "react-resizable-panels";
+import ChatThread from "./components/chat/ChatThread";
+import Sidebar from "./components/sidebar/Sidebar";
+import Todos, { todoType } from "./components/todos/Todos";
+import Button from "./components/ui/Button";
+import type { Image, ModelChoice, Permission, ThreadItem } from "./agent-types";
+import { newThread, sortThreads, type Thread } from "./thread";
 
 type Listed = Awaited<ReturnType<typeof window.agent.listThreads>>;
 
@@ -50,9 +56,13 @@ export default function App() {
   const [runningIds, setRunningIds] = useState<string[]>([]);
   const [finishedId, setFinishedId] = useState<string>();
   const [deleteError, setDeleteError] = useState<string>();
-  const [dragging, setDragging] = useState<boolean | 'new' | 'chat'>(false);
+  const [dragging, setDragging] = useState<boolean | "new" | "chat">(false);
+  const sidebarLayout = useDefaultLayout({
+    id: "sidebar",
+    storage: localStorage,
+  });
   const [permission, setPermission] = useState(
-    () => (localStorage.getItem('mode') ?? 'auto') as Permission,
+    () => (localStorage.getItem("mode") ?? "auto") as Permission,
   );
   // Run id -> the thread whose session it drives; a draft's id changes when its session starts.
   const runs = useRef(
@@ -83,7 +93,7 @@ export default function App() {
 
   const report = (id: string) => (err: unknown) =>
     append(id, {
-      type: 'error',
+      type: "error",
       message: err instanceof Error ? err.message : String(err),
     });
 
@@ -104,7 +114,7 @@ export default function App() {
       ...t,
       permissions: undefined,
       subthreads: t.subthreads?.map((s) =>
-        s.state === 'running' ? { ...s, state: 'read' } : s,
+        s.state === "running" ? { ...s, state: "read" } : s,
       ),
     }));
     setFinishedId(run.id);
@@ -127,7 +137,7 @@ export default function App() {
       window.agent.onEvent((runId, event) => {
         const run = runs.current.get(runId);
         if (!run) return;
-        if (event.type === 'end') {
+        if (event.type === "end") {
           patch(run.id, (t) =>
             t.queued?.length
               ? {
@@ -135,14 +145,14 @@ export default function App() {
                   queued: undefined,
                   items: [
                     ...(t.items ?? []),
-                    { type: 'error', message: 'Queued messages were not sent' },
+                    { type: "error", message: "Queued messages were not sent" },
                   ],
                 }
               : t,
           );
           return finish(runId);
         }
-        if (event.type === 'picked') {
+        if (event.type === "picked") {
           return patch(run.id, (t) => {
             const picked = t.queued?.filter((q) => event.ids.includes(q.uuid));
             if (!picked?.length) return t;
@@ -153,19 +163,19 @@ export default function App() {
             };
           });
         }
-        if (event.type === 'done' && run.stopping) {
+        if (event.type === "done" && run.stopping) {
           run.stopping = false;
           patch(run.id, (t) => ({
             ...t,
-            status: 'error',
+            status: "error",
             updatedAt: Date.now(),
-            items: [...(t.items ?? []), { type: 'error', message: 'STOPPED' }],
+            items: [...(t.items ?? []), { type: "error", message: "STOPPED" }],
           }));
           return;
         }
-        if (event.type === 'state') {
-          if (event.state === 'idle') finish(runId);
-          if (event.state === 'running' && !run.running) {
+        if (event.type === "state") {
+          if (event.state === "idle") finish(runId);
+          if (event.state === "running" && !run.running) {
             run.running = true;
             setFinishedId(undefined);
             setRunningIds((prev) =>
@@ -174,33 +184,43 @@ export default function App() {
           }
           return;
         }
-        if (event.type === 'done' || event.type === 'error') {
-          const status = event.type === 'done' && event.ok ? 'done' : 'error';
+        if (event.type === "done" || event.type === "error") {
+          const status = event.type === "done" && event.ok ? "done" : "error";
           patch(run.id, (t) => ({ ...t, status, updatedAt: Date.now() }));
         }
-        if (event.type === 'permission') {
+        if (event.type === "permission") {
           return patch(run.id, (t) => ({
             ...t,
             permissions: [...(t.permissions ?? []), event.request],
           }));
         }
-        if (event.type === 'context') {
+        if (event.type === "answers") {
+          return patch(run.id, (t) => ({
+            ...t,
+            items: t.items?.map((i) =>
+              i.type === "tool" && i.id === event.id
+                ? { ...i, input: { ...(i.input as object), answers: event.answers } }
+                : i,
+            ),
+          }));
+        }
+        if (event.type === "context") {
           return patch(run.id, (t) => ({ ...t, context: event.percentage }));
         }
-        if (event.type === 'permission-end') {
+        if (event.type === "permission-end") {
           return dropPermission(run.id, event.id);
         }
-        if (event.type === 'subthread') {
+        if (event.type === "subthread") {
           const { id, title } = event;
           return patch(run.id, (t) => ({
             ...t,
             subthreads: [
               ...(t.subthreads ?? []),
-              { id, title, items: [], state: 'running' },
+              { id, title, items: [], state: "running" },
             ],
           }));
         }
-        if (event.type === 'subthread-output') {
+        if (event.type === "subthread-output") {
           return patch(run.id, (t) => ({
             ...t,
             subthreads: t.subthreads?.map((s) =>
@@ -210,17 +230,17 @@ export default function App() {
             ),
           }));
         }
-        if (event.type === 'subthread-end') {
+        if (event.type === "subthread-end") {
           return patch(run.id, (t) => ({
             ...t,
             subthreads: t.subthreads?.map((s) =>
               s.id === event.id
-                ? { ...s, state: event.ok ? 'done' : 'error' }
+                ? { ...s, state: event.ok ? "done" : "error" }
                 : s,
             ),
           }));
         }
-        if (event.type !== 'session') return append(run.id, event);
+        if (event.type !== "session") return append(run.id, event);
         if (!run.draft) return;
         // A draft becomes a real thread once Claude assigns its session id.
         const { sessionId } = event;
@@ -251,7 +271,7 @@ export default function App() {
     const { id, cwd, draft } = active;
     const uuid = crypto.randomUUID();
     const message = {
-      type: 'user' as const,
+      type: "user" as const,
       text: prompt,
       ...(images.length > 0 && { images }),
     };
@@ -323,7 +343,7 @@ export default function App() {
           ...t,
           items: [
             {
-              type: 'error',
+              type: "error",
               message: err instanceof Error ? err.message : String(err),
             },
           ],
@@ -353,7 +373,7 @@ export default function App() {
 
   const todoText = (e: DragEvent) =>
     e.dataTransfer.types.includes(todoType)
-      ? e.dataTransfer.getData('text/plain')
+      ? e.dataTransfer.getData("text/plain")
       : undefined;
 
   function caretToEnd(text: string) {
@@ -388,9 +408,9 @@ export default function App() {
     select(fresh);
   }
 
-  async function openWorkspace() {
+  async function openWorkspace(picked?: string) {
     setDeleteError(undefined);
-    const cwd = await window.agent.pickWorkspace();
+    const cwd = picked ?? (await window.agent.pickWorkspace());
     if (!cwd || cwd === workspace) return;
     const list = await window.agent.listThreads(cwd);
     const mine = merge(
@@ -409,6 +429,11 @@ export default function App() {
     }
   }
 
+  useEffect(() => {
+    const launched = new URLSearchParams(location.search).get("workspace");
+    if (launched) openWorkspace(launched);
+  }, []);
+
   if (!active) {
     return (
       <main className="flex h-screen flex-col items-center justify-center gap-8 bg-void text-ink">
@@ -421,7 +446,7 @@ export default function App() {
         <Button
           variant="primary"
           size="lg"
-          onClick={openWorkspace}
+          onClick={() => openWorkspace()}
           className="chamfer px-6"
         >
           [ OPEN PROJECT ]
@@ -431,112 +456,133 @@ export default function App() {
   }
 
   return (
-    <main className="relative flex h-screen overflow-hidden bg-void text-ink">
-      <Sidebar
-        workspace={active.cwd}
-        onOpenWorkspace={openWorkspace}
-        threads={visible}
-        activeId={active.id}
-        runningIds={runningIds}
-        onSelect={(id) => select(visible.find((t) => t.id === id)!)}
-        onNew={() => create()}
-        onDelete={remove}
-        error={deleteError}
-        permission={permission}
-        onPermission={(next) => {
-          setPermission(next);
-          localStorage.setItem('mode', next);
-          for (const [runId, run] of runs.current) {
-            window.agent.setPermission(runId, next).catch(report(run.id));
-          }
-        }}
-      />
-      {dragging && (
-        <div
-          data-over={dragging === 'new' || undefined}
-          onDragOver={(e) => {
-            if (!e.dataTransfer.types.includes(todoType)) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'copy';
-            setDragging('new');
-          }}
-          onDragLeave={() => setDragging(true)}
-          onDrop={(e) => {
-            const text = todoText(e);
-            if (text === undefined) return;
-            e.preventDefault();
-            flushSync(() => create(text));
-            caretToEnd(text);
-          }}
-          className="absolute inset-y-0 left-0 z-10 flex w-60 items-center justify-center border border-line-strong bg-panel text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech data-over:bg-paper data-over:text-void"
+    <main className="h-screen bg-void text-ink">
+      <Group
+        defaultLayout={sidebarLayout.defaultLayout}
+        onLayoutChanged={sidebarLayout.onLayoutChanged}
+      >
+        <Panel
+          id="sidebar"
+          minSize={200}
+          maxSize={480}
+          defaultSize={240}
+          groupResizeBehavior="preserve-pixel-size"
+          className="relative flex"
         >
-          [ + NEW THREAD ]
-        </div>
-      )}
-      <Todos cwd={active.cwd} onDragging={setDragging}>
-        <div
-          onDragOver={(e) => {
-            if (!e.dataTransfer.types.includes(todoType)) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'copy';
-            setDragging('chat');
-          }}
-          onDragLeave={(e) =>
-            !e.currentTarget.contains(e.relatedTarget as Node) &&
-            setDragging((d) => d && true)
-          }
-          onDrop={(e) => {
-            const text = todoText(e);
-            if (text === undefined) return;
-            e.preventDefault();
-            const prompt = active.prompt?.trimEnd();
-            const next = prompt ? `${prompt}\n${text}` : text;
-            flushSync(() => patch(active.id, (t) => ({ ...t, prompt: next })));
-            caretToEnd(next);
-          }}
-          className="relative flex min-w-0 flex-1"
-        >
+          <Sidebar
+            workspace={active.cwd}
+            onOpenWorkspace={() => openWorkspace()}
+            threads={visible}
+            activeId={active.id}
+            runningIds={runningIds}
+            onSelect={(id) => select(visible.find((t) => t.id === id)!)}
+            onNew={() => create()}
+            onDelete={remove}
+            error={deleteError}
+            permission={permission}
+            onPermission={(next) => {
+              setPermission(next);
+              localStorage.setItem("mode", next);
+              for (const [runId, run] of runs.current) {
+                window.agent.setPermission(runId, next).catch(report(run.id));
+              }
+            }}
+          />
           {dragging && (
             <div
-              data-over={dragging === 'chat' || undefined}
-              className="group pointer-events-none absolute inset-2 z-10 flex items-center justify-center border border-line-strong transition-colors duration-150 ease-mech data-over:border-ink"
+              data-over={dragging === "new" || undefined}
+              onDragOver={(e) => {
+                if (!e.dataTransfer.types.includes(todoType)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+                setDragging("new");
+              }}
+              onDragLeave={() => setDragging(true)}
+              onDrop={(e) => {
+                const text = todoText(e);
+                if (text === undefined) return;
+                e.preventDefault();
+                flushSync(() => create(text));
+                caretToEnd(text);
+              }}
+              className="absolute inset-0 z-10 flex items-center justify-center border border-line-strong bg-panel text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech data-over:bg-paper data-over:text-void"
             >
-              <span className="border border-line-strong bg-panel px-3 py-1 text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech group-data-over:border-paper group-data-over:bg-paper group-data-over:text-void">
-                [ + ADD TO PROMPT ]
-              </span>
+              [ + NEW THREAD ]
             </div>
           )}
-          <ChatThread
-            key={active.key ?? active.id}
-            thread={active}
-            running={runningIds.includes(active.id)}
-            justFinished={finishedId === active.id}
-            onSend={send}
-            onPrompt={(prompt) => patch(active.id, (t) => ({ ...t, prompt }))}
-            onImages={(update) =>
-              patch(active.id, (t) => ({
-                ...t,
-                images: update(t.images ?? []),
-              }))
-            }
-            onCancel={() => {
-              const runId = runOf(active.id);
-              const run = runId && runs.current.get(runId);
-              if (!run) return;
-              run.stopping = run.running;
-              patch(active.id, (t) => ({ ...t, queued: undefined }));
-              window.agent.interrupt(runId).catch(report(active.id));
-            }}
-            onAnswer={(id, allow) => {
-              dropPermission(active.id, id);
-              window.agent
-                .answerPermission(runOf(active.id)!, id, allow)
-                .catch(report(active.id));
-            }}
-            composer={composer}
-          />
-        </div>
-      </Todos>
+        </Panel>
+        <Separator className="relative z-10 w-px bg-line transition-colors duration-150 ease-mech before:absolute before:inset-y-0 before:-inset-x-1 hover:bg-line-strong data-[separator=active]:bg-line-strong" />
+        <Panel id="main" className="flex">
+          <Todos cwd={active.cwd} onDragging={setDragging}>
+            <div
+              onDragOver={(e) => {
+                if (!e.dataTransfer.types.includes(todoType)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+                setDragging("chat");
+              }}
+              onDragLeave={(e) =>
+                !e.currentTarget.contains(e.relatedTarget as Node) &&
+                setDragging((d) => d && true)
+              }
+              onDrop={(e) => {
+                const text = todoText(e);
+                if (text === undefined) return;
+                e.preventDefault();
+                const prompt = active.prompt?.trimEnd();
+                const next = prompt ? `${prompt}\n${text}` : text;
+                flushSync(() =>
+                  patch(active.id, (t) => ({ ...t, prompt: next })),
+                );
+                caretToEnd(next);
+              }}
+              className="relative flex min-w-0 flex-1"
+            >
+              {dragging && (
+                <div
+                  data-over={dragging === "chat" || undefined}
+                  className="group pointer-events-none absolute inset-2 z-10 flex items-center justify-center border border-line-strong transition-colors duration-150 ease-mech data-over:border-ink"
+                >
+                  <span className="border border-line-strong bg-panel px-3 py-1 text-2xs tracking-widest text-mute transition-colors duration-150 ease-mech group-data-over:border-paper group-data-over:bg-paper group-data-over:text-void">
+                    [ + ADD TO PROMPT ]
+                  </span>
+                </div>
+              )}
+              <ChatThread
+                key={active.key ?? active.id}
+                thread={active}
+                running={runningIds.includes(active.id)}
+                justFinished={finishedId === active.id}
+                onSend={send}
+                onPrompt={(prompt) =>
+                  patch(active.id, (t) => ({ ...t, prompt }))
+                }
+                onImages={(update) =>
+                  patch(active.id, (t) => ({
+                    ...t,
+                    images: update(t.images ?? []),
+                  }))
+                }
+                onCancel={() => {
+                  const runId = runOf(active.id);
+                  const run = runId && runs.current.get(runId);
+                  if (!run) return;
+                  run.stopping = run.running;
+                  patch(active.id, (t) => ({ ...t, queued: undefined }));
+                  window.agent.interrupt(runId).catch(report(active.id));
+                }}
+                onAnswer={(id, allow, answers) => {
+                  dropPermission(active.id, id);
+                  window.agent
+                    .answerPermission(runOf(active.id)!, id, allow, answers)
+                    .catch(report(active.id));
+                }}
+                composer={composer}
+              />
+            </div>
+          </Todos>
+        </Panel>
+      </Group>
     </main>
   );
 }

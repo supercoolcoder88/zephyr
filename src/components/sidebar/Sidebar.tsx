@@ -146,7 +146,7 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-panel">
+    <aside className="flex min-w-0 flex-1 flex-col bg-panel">
       <header className="flex h-12 items-center justify-between border-b border-line px-4">
         <span className="flex items-baseline gap-2">
           <span className="text-sm font-medium tracking-[0.3em]">ZEPHYR</span>
