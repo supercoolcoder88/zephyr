@@ -18,9 +18,13 @@ npm install
 log "Packaging app"
 npm run package
 log "Copying build to $dest"
-rm -rf "$dest"
 mkdir -p "$(dirname "$dest")" "$bin"
-cp -r out/zephyr-linux-x64 "$dest"
+# Copy beside the old build first so a failed copy leaves it runnable.
+rm -rf "$dest.new"
+cp -r out/zephyr-linux-x64 "$dest.new"
+rm -rf "$dest"
+mv "$dest.new" "$dest"
+commit=$(git rev-parse HEAD)
 
 cat > "$bin/zephyr" <<LAUNCHER
 #!/usr/bin/env bash
@@ -30,7 +34,7 @@ elif [ -n "\${1:-}" ]; then
   [ -d "\$1" ] || { echo "zephyr: \$1 is not a directory" >&2; exit 1; }
   set -- "\$(realpath "\$1")"
 fi
-ZEPHYR_SOURCE="$PWD" setsid "$dest/zephyr" "\$@" >/dev/null 2>&1 &
+ZEPHYR_SOURCE="$PWD" ZEPHYR_COMMIT="$commit" setsid "$dest/zephyr" "\$@" >/dev/null 2>&1 &
 LAUNCHER
 chmod +x "$bin/zephyr"
 

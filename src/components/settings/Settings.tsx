@@ -1,13 +1,14 @@
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Permission, UsageWindow } from '../../agent-types';
+import type { Permission, UpdateStatus, UsageWindow } from '../../agent-types';
 import Button from '../ui/Button';
 import useDismiss from '../ui/useDismiss';
 
 interface Props {
   permission: Permission;
   onPermission(permission: Permission): void;
-  updates: string[];
+  update: UpdateStatus;
+  workspace: string;
   onClose(): void;
 }
 
@@ -31,7 +32,7 @@ const hotkeys = [
   ['Next / previous thread', 'Ctrl + Tab / Ctrl + Shift + Tab'],
   ['Open folder', 'Ctrl + O'],
   ['Open settings', 'Ctrl + ,'],
-  ['Toggle todos', 'Ctrl + T'],
+  ['Toggle backlog', 'Ctrl + T'],
   ['Close popup', 'Esc'],
 ];
 
@@ -87,7 +88,8 @@ function Segmented({
 export default function Settings({
   permission,
   onPermission,
-  updates,
+  update,
+  workspace,
   onClose,
 }: Props) {
   const [section, setSection] =
@@ -95,6 +97,7 @@ export default function Settings({
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
   const [cycle, setCycle] = useState(localStorage.getItem('cycle') ?? 'active');
   const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState(update.error);
   const [usage, setUsage] = useState<
     'loading' | 'error' | UsageWindow[] | null
   >();
@@ -114,7 +117,14 @@ export default function Settings({
   useEffect(() => {
     if (section !== 'Usage' || usage !== undefined) return;
     setUsage('loading');
-    window.agent.usage().then(setUsage, () => setUsage('error'));
+    // Usage only refreshes after a reply, so the last one seen covers a fresh launch.
+    window.agent.usage().then(
+      (u) => {
+        if (u) localStorage.setItem('usage', JSON.stringify(u));
+        setUsage(u ?? JSON.parse(localStorage.getItem('usage') ?? 'null'));
+      },
+      () => setUsage('error'),
+    );
   }, [section]);
 
   function pickTheme(next: string) {
@@ -134,7 +144,9 @@ export default function Settings({
       >
         <nav className="flex w-44 shrink-0 flex-col border-r border-line bg-panel py-2">
           {sections
-            .filter((s) => s !== 'Update' || updates.length)
+            .filter(
+              (s) => s !== 'Update' || update.commits.length || update.error,
+            )
             .map((s) => (
               <button
                 key={s}
@@ -232,7 +244,15 @@ export default function Settings({
               ))}
             {section === 'Update' && (
               <>
-                {updates.map((subject, i) => (
+                {installError && (
+                  <p
+                    role="alert"
+                    className="py-3 text-sm break-words text-alert"
+                  >
+                    {installError}
+                  </p>
+                )}
+                {update.commits.map((subject, i) => (
                   <Row key={i} name={subject} />
                 ))}
                 <Button
@@ -241,7 +261,11 @@ export default function Settings({
                   disabled={installing}
                   onClick={() => {
                     setInstalling(true);
-                    window.update.install();
+                    setInstallError(undefined);
+                    window.update.install(workspace).then((error) => {
+                      setInstallError(error);
+                      setInstalling(!error);
+                    });
                   }}
                   className="my-4"
                 >

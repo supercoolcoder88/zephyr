@@ -121,7 +121,7 @@ export default function ChatThread({
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6"
       >
         {turns.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 pt-24">
+          <div className="flex h-full flex-col items-center justify-center gap-2">
             <p className="text-5xl font-medium tracking-widest">READY</p>
             <p className="text-2xs tracking-widest text-mute">
               NO MESSAGES YET

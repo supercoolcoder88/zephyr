@@ -23,7 +23,7 @@ node scripts/ui.mjs stop                  # kills the app and deletes /tmp/zephy
 
 1. `start`, then `click "text=OPEN PROJECT"` to get past the home screen.
 2. Get the UI into the state your change affects, then `shot` and Read the PNG. Check it against `STYLES.md`.
-3. Renderer edits hot-reload into the running instance, so just shoot again. Changes to `main.ts`, `agent.ts`, `todos.ts` or `preload.ts` need `stop` then `start`.
+3. Renderer edits hot-reload into the running instance, so just shoot again. Changes to `main.ts`, `agent.ts`, `backlog.ts` or `preload.ts` need `stop` then `start`.
 4. Always `stop` when done, including after failures.
 
 ## Notes

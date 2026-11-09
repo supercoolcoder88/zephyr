@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { beforeAll, expect, it, vi } from 'vitest';
-import type { Todo, TodoEdit } from './agent-types';
+import type { BacklogEntry, BacklogEdit } from './agent-types';
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -14,12 +14,12 @@ vi.mock('electron', () => ({
   },
 }));
 
-const { apply, parse, registerTodoIpc } = await import('./todos');
+const { apply, parse, registerBacklogIpc } = await import('./backlog');
 
-beforeAll(() => registerTodoIpc());
+beforeAll(() => registerBacklogIpc());
 
-const edit = (cwd: string, change: TodoEdit) =>
-  handlers.get('todos:edit')!({}, cwd, change) as Promise<Todo[]>;
+const edit = (cwd: string, change: BacklogEdit) =>
+  handlers.get('backlog:edit')!({}, cwd, change) as Promise<BacklogEntry[]>;
 
 const doc = `# Plan
 
@@ -37,35 +37,35 @@ it('parses task lines at any depth and keeps their line numbers', () => {
   ]);
 });
 
-it('toggles only the box on the todo line', () => {
+it('toggles only the box on the entry line', () => {
   const [, nested] = parse(doc);
-  expect(apply(doc, { type: 'toggle', todo: nested })).toBe(
+  expect(apply(doc, { type: 'toggle', entry: nested })).toBe(
     doc.replace('[X] nested', '[ ] nested'),
   );
 });
 
-it('finds a todo that moved since it was read and skips one that is gone', () => {
+it('finds a entry that moved since it was read and skips one that is gone', () => {
   const moved = `- [ ] new\n${doc}`;
-  const [todo] = parse(doc);
-  expect(apply(moved, { type: 'remove', todo })).toBe(
+  const [entry] = parse(doc);
+  expect(apply(moved, { type: 'remove', entry })).toBe(
     moved.replace('- [ ] write tests\n', ''),
   );
   expect(
     apply(doc, {
       type: 'toggle',
-      todo: { line: 2, text: 'gone', done: false },
+      entry: { line: 2, text: 'gone', done: false },
     }),
   ).toBe(doc);
 });
 
-it('appends a new todo on one line', () => {
+it('appends a new entry on one line', () => {
   expect(apply('', { type: 'add', text: '  a\nb ' })).toBe('- [ ] a b\n');
   expect(apply('notes', { type: 'add', text: 'a' })).toBe('notes\n- [ ] a\n');
   expect(apply('x\n', { type: 'add', text: ' ' })).toBe('x\n');
 });
 
 it('creates a self-ignoring .zephyr folder on the first write', async () => {
-  const cwd = await mkdtemp(path.join(os.tmpdir(), 'todos-'));
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'backlog-'));
   expect(await edit(cwd, { type: 'add', text: 'one' })).toEqual([
     { line: 0, text: 'one', done: false },
   ]);
@@ -75,9 +75,9 @@ it('creates a self-ignoring .zephyr folder on the first write', async () => {
 });
 
 it('leaves an existing .zephyr folder without a .gitignore alone', async () => {
-  const cwd = await mkdtemp(path.join(os.tmpdir(), 'todos-'));
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'backlog-'));
   await mkdir(path.join(cwd, '.zephyr'));
-  await writeFile(path.join(cwd, '.zephyr', 'todos.md'), '- [ ] one\n');
+  await writeFile(path.join(cwd, '.zephyr', 'backlog.md'), '- [ ] one\n');
   await edit(cwd, { type: 'add', text: 'two' });
   await expect(
     readFile(path.join(cwd, '.zephyr', '.gitignore')),
@@ -85,11 +85,11 @@ it('leaves an existing .zephyr folder without a .gitignore alone', async () => {
 });
 
 it('applies quick edits in order without losing any', async () => {
-  const cwd = await mkdtemp(path.join(os.tmpdir(), 'todos-'));
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'backlog-'));
   await Promise.all(
     ['a', 'b', 'c'].map((text) => edit(cwd, { type: 'add', text })),
   );
-  expect(await readFile(path.join(cwd, '.zephyr', 'todos.md'), 'utf8')).toBe(
+  expect(await readFile(path.join(cwd, '.zephyr', 'backlog.md'), 'utf8')).toBe(
     '- [ ] a\n- [ ] b\n- [ ] c\n',
   );
 });
@@ -106,10 +106,10 @@ const plan = `# Plan
 - [ ] d
 `;
 const [a, b, child, c, d] = parse(plan);
-const move = (todo: Todo, before?: Todo, content = plan) =>
-  apply(content, { type: 'move', todo, before });
+const move = (entry: BacklogEntry, before?: BacklogEntry, content = plan) =>
+  apply(content, { type: 'move', entry, before });
 
-it('moves a todo before another, up or down, or to after the last one', () => {
+it('moves a entry before another, up or down, or to after the last one', () => {
   expect(move(c, a)).toBe(
     plan
       .replace('- [ ] a\n', '- [x] c\n- [ ] a\n')
@@ -124,7 +124,7 @@ it('moves a todo before another, up or down, or to after the last one', () => {
   expect(move(d, undefined, '- [ ] d\n- [ ] e')).toBe('- [ ] e\n- [ ] d\n');
 });
 
-it('moves a todo with its nested lines and skips moves that change nothing', () => {
+it('moves a entry with its nested lines and skips moves that change nothing', () => {
   expect(move(b, a)).toBe(
     plan.replace(
       '- [ ] a\n- [ ] b\n  - [ ] b child\n  notes on b\n',
@@ -137,19 +137,19 @@ it('moves a todo with its nested lines and skips moves that change nothing', () 
   expect(move(a, { line: 3, text: 'gone', done: false })).toBe(move(a));
 });
 
-it('leaves the last todo block in place when moving it to the end', () => {
+it('leaves the last entry block in place when moving it to the end', () => {
   expect(move(d)).toBe(plan);
   expect(move(a, undefined, '- [ ] a\n')).toBe('- [ ] a\n');
   const nested = '- [ ] a\n  - [ ] kid\n';
   expect(move(parse(nested)[0], undefined, nested)).toBe(nested);
 });
 
-it('renames only the text of a todo line', () => {
+it('renames only the text of a entry line', () => {
   expect(
-    apply(plan, { type: 'rename', todo: child, text: ' kid \n too ' }),
+    apply(plan, { type: 'rename', entry: child, text: ' kid \n too ' }),
   ).toBe(plan.replace('  - [ ] b child', '  - [ ] kid too'));
   expect(
-    apply(doc, { type: 'rename', todo: parse(doc)[1], text: 'deep' }),
+    apply(doc, { type: 'rename', entry: parse(doc)[1], text: 'deep' }),
   ).toBe(doc.replace('[X] nested', '[X] deep'));
-  expect(apply(plan, { type: 'rename', todo: c, text: '  ' })).toBe(plan);
+  expect(apply(plan, { type: 'rename', entry: c, text: '  ' })).toBe(plan);
 });

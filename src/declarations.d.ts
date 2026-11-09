@@ -4,6 +4,6 @@ declare module '*.css';
 
 interface Window {
   agent: import('./agent-types').AgentApi;
-  todos: import('./agent-types').TodoApi;
+  backlog: import('./agent-types').BacklogApi;
   update: import('./agent-types').UpdateApi;
 }

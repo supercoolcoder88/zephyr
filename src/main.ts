@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, shell } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { registerAgentIpc } from './agent';
-import { registerTodoIpc } from './todos';
+import { registerBacklogIpc } from './backlog';
 import { registerUpdateIpc } from './update';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -63,7 +63,7 @@ app.whenReady().then(() => {
   // The default menu carries Chromium's zoom, reload and devtools accelerators.
   Menu.setApplicationMenu(null);
   registerAgentIpc();
-  registerTodoIpc();
+  registerBacklogIpc();
   registerUpdateIpc();
   createWindow();
 

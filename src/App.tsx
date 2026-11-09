@@ -8,7 +8,7 @@ import {
 } from "react-resizable-panels";
 import ChatThread from "./components/chat/ChatThread";
 import Sidebar from "./components/sidebar/Sidebar";
-import Todos, { todoType } from "./components/todos/Todos";
+import Backlog, { backlogType } from "./components/backlog/Backlog";
 import Button from "./components/ui/Button";
 import type { Image, ModelChoice, Permission, ThreadItem } from "./agent-types";
 import {
@@ -28,6 +28,9 @@ function merge(
   list: Listed,
   running: string[],
 ): Thread[] {
+  const saved: Record<string, number> = JSON.parse(
+    localStorage.getItem("context") ?? "{}",
+  );
   return [
     ...mine.filter(
       (t) =>
@@ -49,7 +52,7 @@ function merge(
         key: known?.key,
         prompt: known?.prompt,
         images: known?.images,
-        context: known?.context,
+        context: known?.context ?? saved[id],
       };
     }),
   ];
@@ -214,6 +217,13 @@ export default function App() {
           }));
         }
         if (event.type === "context") {
+          localStorage.setItem(
+            "context",
+            JSON.stringify({
+              ...JSON.parse(localStorage.getItem("context") ?? "{}"),
+              [run.id]: event.percentage,
+            }),
+          );
           return patch(run.id, (t) => ({ ...t, context: event.percentage }));
         }
         if (event.type === "permission-end") {
@@ -395,8 +405,8 @@ export default function App() {
     select(thread);
   }
 
-  const todoText = (e: DragEvent) =>
-    e.dataTransfer.types.includes(todoType)
+  const entryText = (e: DragEvent) =>
+    e.dataTransfer.types.includes(backlogType)
       ? e.dataTransfer.getData("text/plain")
       : undefined;
 
@@ -519,14 +529,14 @@ export default function App() {
             <div
               data-over={dragging === "new" || undefined}
               onDragOver={(e) => {
-                if (!e.dataTransfer.types.includes(todoType)) return;
+                if (!e.dataTransfer.types.includes(backlogType)) return;
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "copy";
                 setDragging("new");
               }}
               onDragLeave={() => setDragging(true)}
               onDrop={(e) => {
-                const text = todoText(e);
+                const text = entryText(e);
                 if (text === undefined) return;
                 e.preventDefault();
                 flushSync(() => create(text));
@@ -540,10 +550,10 @@ export default function App() {
         </Panel>
         <Separator className="relative z-10 w-px bg-line transition-colors duration-150 ease-mech before:absolute before:inset-y-0 before:-inset-x-1 hover:bg-line-strong data-[separator=active]:bg-line-strong" />
         <Panel id="main" className="flex">
-          <Todos cwd={active.cwd} onDragging={setDragging}>
+          <Backlog cwd={active.cwd} onDragging={setDragging}>
             <div
               onDragOver={(e) => {
-                if (!e.dataTransfer.types.includes(todoType)) return;
+                if (!e.dataTransfer.types.includes(backlogType)) return;
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "copy";
                 setDragging("chat");
@@ -553,7 +563,7 @@ export default function App() {
                 setDragging((d) => d && true)
               }
               onDrop={(e) => {
-                const text = todoText(e);
+                const text = entryText(e);
                 if (text === undefined) return;
                 e.preventDefault();
                 const prompt = active.prompt?.trimEnd();
@@ -607,7 +617,7 @@ export default function App() {
                 composer={composer}
               />
             </div>
-          </Todos>
+          </Backlog>
         </Panel>
       </Group>
     </main>

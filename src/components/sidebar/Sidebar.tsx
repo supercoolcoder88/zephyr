@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, Settings as SettingsIcon, X } from 'lucide-react';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import type { Permission } from '../../agent-types';
+import type { Permission, UpdateStatus } from '../../agent-types';
 import { stateDot, threadState, type Thread } from '../../thread';
 import Button from '../ui/Button';
 import Settings from '../settings/Settings';
@@ -46,10 +46,10 @@ export default function Sidebar({
   const [confirmId, setConfirmId] = useState<string>();
   const [showArchived, setShowArchived] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [updates, setUpdates] = useState<string[]>([]);
+  const [update, setUpdate] = useState<UpdateStatus>({ commits: [] });
 
   useEffect(() => {
-    window.update.check().then(setUpdates, () => {});
+    window.update.check().then(setUpdate, () => {});
   }, []);
 
   const lastRead = useRef<string>(undefined);
@@ -187,7 +187,7 @@ export default function Sidebar({
           className="relative"
         >
           <SettingsIcon {...icon} />
-          {updates.length > 0 && (
+          {(update.commits.length > 0 || update.error) && (
             <span
               title="Update available"
               className="absolute -top-0.5 -right-0.5 size-1.5 bg-warn"
@@ -208,7 +208,8 @@ export default function Sidebar({
         <Settings
           permission={permission}
           onPermission={onPermission}
-          updates={updates}
+          update={update}
+          workspace={workspace}
           onClose={() => setSettingsOpen(false)}
         />
       )}

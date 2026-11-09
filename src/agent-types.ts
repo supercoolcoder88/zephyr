@@ -146,30 +146,38 @@ export interface AgentApi {
   deleteThread(sessionId: string, cwd: string): Promise<void>;
 }
 
-// A `- [ ]` line of the project's .zephyr/todos.md; line is its 0-based index there.
-export interface Todo {
+// A `- [ ]` line of the project's .zephyr/backlog.md; line is its 0-based index there.
+export interface BacklogEntry {
   line: number;
   text: string;
   done: boolean;
 }
 
-export type TodoEdit =
+export type BacklogEdit =
   | { type: 'add'; text: string }
-  | { type: 'toggle' | 'remove'; todo: Todo }
-  | { type: 'rename'; todo: Todo; text: string }
-  // Moves the todo and its nested lines to just before `before`, or after the last todo.
-  | { type: 'move'; todo: Todo; before?: Todo };
+  | { type: 'toggle' | 'remove'; entry: BacklogEntry }
+  | { type: 'rename'; entry: BacklogEntry; text: string }
+  // Moves the entry and its nested lines to just before `before`, or after the last entry.
+  | { type: 'move'; entry: BacklogEntry; before?: BacklogEntry };
 
-export interface TodoApi {
-  // Starts watching cwd's todo file, replacing the previous watch, and resolves its todos.
-  watch(cwd: string): Promise<Todo[]>;
-  edit(cwd: string, edit: TodoEdit): Promise<Todo[]>;
-  onChange(listener: (cwd: string, todos: Todo[]) => void): () => void;
+export interface BacklogApi {
+  // Starts watching cwd's entry file, replacing the previous watch, and resolves its entries.
+  watch(cwd: string): Promise<BacklogEntry[]>;
+  edit(cwd: string, edit: BacklogEdit): Promise<BacklogEntry[]>;
+  onChange(
+    listener: (cwd: string, entries: BacklogEntry[]) => void,
+  ): () => void;
+}
+
+export interface UpdateStatus {
+  // Subjects of the commits this build is missing, empty when up to date.
+  commits: string[];
+  // Set when the last update failed to install.
+  error?: string;
 }
 
 export interface UpdateApi {
-  // Subjects of the commits available upstream, empty when up to date.
-  check(): Promise<string[]>;
-  // Quits, installs the update and relaunches.
-  install(): Promise<void>;
+  check(): Promise<UpdateStatus>;
+  // Quits, installs the update and relaunches into workspace; resolves to an error if the pull fails.
+  install(workspace: string): Promise<string | undefined>;
 }

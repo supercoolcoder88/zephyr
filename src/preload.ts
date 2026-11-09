@@ -4,8 +4,8 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type {
   AgentApi,
   AgentEvent,
-  Todo,
-  TodoApi,
+  BacklogEntry,
+  BacklogApi,
   UpdateApi,
 } from './agent-types';
 
@@ -53,20 +53,20 @@ const agent: AgentApi = {
   },
 };
 
-const todos: TodoApi = {
-  watch: (cwd) => ipcRenderer.invoke('todos:watch', cwd),
-  edit: (cwd, edit) => ipcRenderer.invoke('todos:edit', cwd, edit),
+const entries: BacklogApi = {
+  watch: (cwd) => ipcRenderer.invoke('backlog:watch', cwd),
+  edit: (cwd, edit) => ipcRenderer.invoke('backlog:edit', cwd, edit),
   onChange: (listener) => {
-    const handler = (_: IpcRendererEvent, cwd: string, list: Todo[]) =>
+    const handler = (_: IpcRendererEvent, cwd: string, list: BacklogEntry[]) =>
       listener(cwd, list);
-    ipcRenderer.on('todos:change', handler);
-    return () => ipcRenderer.off('todos:change', handler);
+    ipcRenderer.on('backlog:change', handler);
+    return () => ipcRenderer.off('backlog:change', handler);
   },
 };
 
 contextBridge.exposeInMainWorld('agent', agent);
-contextBridge.exposeInMainWorld('todos', todos);
+contextBridge.exposeInMainWorld('backlog', entries);
 contextBridge.exposeInMainWorld('update', {
   check: () => ipcRenderer.invoke('update:check'),
-  install: () => ipcRenderer.invoke('update:install'),
+  install: (workspace) => ipcRenderer.invoke('update:install', workspace),
 } satisfies UpdateApi);

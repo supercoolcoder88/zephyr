@@ -10,7 +10,7 @@ import userEvent from '@testing-library/user-event';
 import type { ComponentProps, ReactNode, Ref } from 'react';
 import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import App from './App';
-import type { AgentEvent, Todo, TodoApi } from './agent-types';
+import type { AgentEvent, BacklogEntry, BacklogApi } from './agent-types';
 
 // jsdom gives every element a zero-size box, so the library's pointer hit-testing
 // would treat every click as a separator drag. The fake panel collapses and
@@ -95,10 +95,10 @@ const agent = {
 };
 let catalogListener: (cwd: string) => void;
 const update = { check: vi.fn(), install: vi.fn() };
-const todos = {
-  watch: vi.fn<TodoApi['watch']>(),
-  edit: vi.fn<TodoApi['edit']>(),
-  onChange: vi.fn<TodoApi['onChange']>(),
+const backlog = {
+  watch: vi.fn<BacklogApi['watch']>(),
+  edit: vi.fn<BacklogApi['edit']>(),
+  onChange: vi.fn<BacklogApi['onChange']>(),
 };
 
 beforeEach(() => {
@@ -139,15 +139,16 @@ beforeEach(() => {
     return () => undefined;
   });
   window.agent = agent;
-  todos.watch.mockResolvedValue([]);
-  todos.edit.mockReset();
-  todos.onChange.mockImplementation(() => () => undefined);
-  window.todos = todos;
+  backlog.watch.mockResolvedValue([]);
+  backlog.edit.mockReset();
+  backlog.onChange.mockImplementation(() => () => undefined);
+  window.backlog = backlog;
   agent.onCatalogChange.mockImplementation((l) => {
     catalogListener = l;
     return () => undefined;
   });
-  update.check.mockResolvedValue([]);
+  update.check.mockResolvedValue({ commits: [] });
+  update.install.mockReset().mockResolvedValue(undefined);
   window.update = update;
   Element.prototype.scrollIntoView = () => undefined;
 });
@@ -1530,8 +1531,29 @@ it('lists usage limits and hotkeys in settings', async () => {
   expect(screen.getByText('Session')).toBeInTheDocument();
   expect(screen.getByText('42%')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Hotkeys' }));
-  expect(screen.getByText('Toggle todos')).toBeInTheDocument();
+  expect(screen.getByText('Toggle backlog')).toBeInTheDocument();
   expect(screen.getByText('Ctrl + T')).toBeInTheDocument();
+});
+
+it('shows the last usage seen when none was fetched this run', async () => {
+  localStorage.setItem(
+    'usage',
+    JSON.stringify([{ label: 'Week', utilization: 61, resetsAt: null }]),
+  );
+  agent.usage.mockResolvedValue(null);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Usage' }));
+  expect(await screen.findByText('61%')).toBeInTheDocument();
+});
+
+it('shows the last context used by a thread before it gets a new reply', async () => {
+  localStorage.setItem('context', JSON.stringify({ a: 33 }));
+  agent.listThreads.mockResolvedValue(list);
+  agent.loadThread.mockResolvedValue([{ type: 'text', text: 'old answer' }]);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  expect(await screen.findByText('33% USED')).toBeInTheDocument();
 });
 
 it('switches theme from settings and remembers it', async () => {
@@ -1594,39 +1616,40 @@ it('hides the working wave while waiting for permission', async () => {
   expect(wave()).toBeInTheDocument();
 });
 
-it('shows the project todos, edits them and follows changes on disk', async () => {
-  let change: (cwd: string, todos: Todo[]) => void = () => undefined;
-  todos.onChange.mockImplementation((l) => {
+it('shows the project entries, edits them and follows changes on disk', async () => {
+  let change: (cwd: string, entries: BacklogEntry[]) => void = () => undefined;
+  backlog.onChange.mockImplementation((l) => {
     change = l;
     return () => undefined;
   });
-  todos.watch.mockResolvedValue([{ line: 0, text: 'ship', done: false }]);
-  todos.edit.mockResolvedValue([
+  backlog.watch.mockResolvedValue([{ line: 0, text: 'ship', done: false }]);
+  backlog.edit.mockResolvedValue([
     { line: 0, text: 'ship', done: false },
     { line: 1, text: 'docs', done: false },
   ]);
   const user = await open();
-  expect(todos.watch).toHaveBeenCalledWith('/proj');
+  expect(backlog.watch).toHaveBeenCalledWith('/proj');
   await user.click(await screen.findByRole('checkbox', { name: 'ship' }));
-  expect(todos.edit).toHaveBeenCalledWith('/proj', {
+  expect(backlog.edit).toHaveBeenCalledWith('/proj', {
     type: 'toggle',
-    todo: { line: 0, text: 'ship', done: false },
+    entry: { line: 0, text: 'ship', done: false },
   });
-  await user.type(screen.getByLabelText('New todo'), 'docs{Enter}');
-  expect(todos.edit).toHaveBeenLastCalledWith('/proj', {
+  await user.type(screen.getByLabelText('New backlog entry'), 'docs{Enter}');
+  expect(backlog.edit).toHaveBeenLastCalledWith('/proj', {
     type: 'add',
     text: 'docs',
   });
-  expect(screen.getByLabelText('New todo')).toHaveValue('');
+  expect(screen.getByLabelText('New backlog entry')).toHaveValue('');
   await screen.findByRole('checkbox', { name: 'docs' });
   act(() => change('/other', []));
   expect(screen.getByRole('checkbox', { name: 'docs' })).toBeInTheDocument();
   act(() => change('/proj', [{ line: 0, text: 'ship', done: true }]));
-  expect(screen.getByRole('checkbox', { name: 'ship' })).toBeChecked();
+  expect(screen.queryByRole('checkbox', { name: 'ship' })).toBeNull();
   expect(screen.queryByRole('checkbox', { name: 'docs' })).toBeNull();
+  expect(screen.getByRole('button', { name: '[ DONE 1 ]' })).toBeVisible();
 });
 
-const todoRow = (name: string) =>
+const entryRow = (name: string) =>
   screen.getByRole('checkbox', { name }).closest('li')!;
 
 function transfer(data: Record<string, string> = {}) {
@@ -1641,30 +1664,43 @@ function transfer(data: Record<string, string> = {}) {
   };
 }
 
-async function openWithTodos(list: Todo[]) {
-  todos.watch.mockResolvedValue(list);
-  todos.edit.mockResolvedValue(list);
+async function openWithBacklog(list: BacklogEntry[]) {
+  backlog.watch.mockResolvedValue(list);
+  backlog.edit.mockResolvedValue(list);
   const user = await open();
   await screen.findByRole('checkbox', { name: list[0].text });
-  return { user, edit: todos.edit };
+  return { user, edit: backlog.edit };
 }
 
-it('toggles the todo panel from its icon button and the separator lines', async () => {
+it('hides done entries until they are shown', async () => {
+  const { user } = await openWithBacklog([
+    { line: 0, text: 'ship', done: false },
+    { line: 1, text: 'docs', done: true },
+  ]);
+  expect(screen.queryByRole('checkbox', { name: 'docs' })).toBeNull();
+  await user.click(screen.getByRole('button', { name: '[ DONE 1 ]' }));
+  expect(screen.getByRole('checkbox', { name: 'docs' })).toBeChecked();
+  await user.click(screen.getByRole('button', { name: '[ HIDE DONE ]' }));
+  expect(screen.queryByRole('checkbox', { name: 'docs' })).toBeNull();
+  expect(screen.getByRole('checkbox', { name: 'ship' })).toBeInTheDocument();
+});
+
+it('toggles the entry panel from its icon button and the separator lines', async () => {
   const user = await open();
-  const toggle = screen.getByRole('button', { name: 'Hide todos' });
+  const toggle = screen.getByRole('button', { name: 'Hide backlog' });
   expect(toggle.querySelector('svg.lucide')).not.toBeNull();
   expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await user.click(toggle);
-  expect(toggle).toHaveAccessibleName('Show todos');
+  expect(toggle).toHaveAccessibleName('Show backlog');
   expect(toggle).toHaveAttribute('aria-expanded', 'false');
   const line = toggle.parentElement!.firstElementChild!;
   await user.click(line);
-  expect(toggle).toHaveAccessibleName('Hide todos');
+  expect(toggle).toHaveAccessibleName('Hide backlog');
   fireEvent.pointerDown(line, { clientX: 100, clientY: 100 });
   fireEvent.pointerMove(line, { clientX: 140, clientY: 100 });
   fireEvent.pointerUp(line, { clientX: 140, clientY: 100 });
   fireEvent.click(line, { clientX: 140, clientY: 100, detail: 1 });
-  expect(toggle).toHaveAccessibleName('Hide todos');
+  expect(toggle).toHaveAccessibleName('Hide backlog');
 });
 
 it('keeps the panel snap animation running for the full duration after a second toggle', async () => {
@@ -1673,7 +1709,7 @@ it('keeps the panel snap animation running for the full duration after a second 
   onTestFinished(() => {
     vi.useRealTimers();
   });
-  const toggle = screen.getByRole('button', { name: 'Hide todos' });
+  const toggle = screen.getByRole('button', { name: 'Hide backlog' });
   const snapping = () => document.querySelector('[data-snap]') !== null;
   expect(snapping()).toBe(false);
   fireEvent.click(toggle);
@@ -1690,11 +1726,11 @@ it('keeps the panel snap animation running for the full duration after a second 
   expect(vi.getTimerCount()).toBe(timers - 1);
 });
 
-it('shows the platform shortcut on the todo toggle', async () => {
+it('shows the platform shortcut on the entry toggle', async () => {
   await open();
-  expect(screen.getByRole('button', { name: 'Hide todos' })).toHaveAttribute(
+  expect(screen.getByRole('button', { name: 'Hide backlog' })).toHaveAttribute(
     'title',
-    'Toggle todos (Ctrl+T)',
+    'Toggle backlog (Ctrl+T)',
   );
   cleanup();
   const ua = vi
@@ -1704,51 +1740,52 @@ it('shows the platform shortcut on the todo toggle', async () => {
     );
   onTestFinished(() => ua.mockRestore());
   await open();
-  expect(screen.getByRole('button', { name: 'Hide todos' })).toHaveAttribute(
+  expect(screen.getByRole('button', { name: 'Hide backlog' })).toHaveAttribute(
     'title',
-    'Toggle todos (⌘T)',
+    'Toggle backlog (⌘T)',
   );
 });
 
-it('starts with the todo panel closed when the saved layout collapsed it', async () => {
+it('starts with the entry panel closed when the saved layout collapsed it', async () => {
   localStorage.setItem(
-    'react-resizable-panels:todos',
-    JSON.stringify({ main: 100, todos: 0 }),
+    'react-resizable-panels:backlog',
+    JSON.stringify({ main: 100, backlog: 0 }),
   );
   await open();
-  expect(screen.getByRole('button', { name: 'Show todos' })).toHaveAttribute(
+  expect(screen.getByRole('button', { name: 'Show backlog' })).toHaveAttribute(
     'aria-expanded',
     'false',
   );
 });
 
-it('toggles the todo panel with Ctrl+T, even from the composer', async () => {
+it('toggles the entry panel with Ctrl+T, even from the composer', async () => {
   const user = await open();
   const box = screen.getByPlaceholderText('Ask the agent…');
   await user.click(box);
   await user.keyboard('{Control>}t{/Control}');
-  expect(screen.getByRole('button', { name: 'Show todos' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Show backlog' })).toBeVisible();
   expect(box).toHaveValue('');
   await user.keyboard('{Meta>}t{/Meta}');
-  expect(screen.getByRole('button', { name: 'Hide todos' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Hide backlog' })).toBeVisible();
 });
 
-it('lists done todos after open ones and says when there are none', async () => {
-  await openWithTodos([
-    { line: 0, text: 'old', done: true },
+it('lists done entries after open ones and says when there are none', async () => {
+  const { user } = await openWithBacklog([
     { line: 1, text: 'next', done: false },
+    { line: 0, text: 'old', done: true },
     { line: 2, text: 'later', done: false },
   ]);
+  await user.click(screen.getByRole('button', { name: '[ DONE 1 ]' }));
   expect(
     screen.getAllByRole('checkbox').map((c) => c.getAttribute('aria-label')),
   ).toEqual(['next', 'later', 'old']);
-  act(() => todos.onChange.mock.lastCall![0]('/proj', []));
-  expect(screen.getByText('NO TODOS')).toBeInTheDocument();
+  act(() => backlog.onChange.mock.lastCall![0]('/proj', []));
+  expect(screen.getByText('EMPTY')).toBeInTheDocument();
 });
 
-it('renames a todo inline', async () => {
+it('renames a entry inline', async () => {
   const ship = { line: 0, text: 'ship', done: false };
-  const { user, edit } = await openWithTodos([ship]);
+  const { user, edit } = await openWithBacklog([ship]);
   await user.dblClick(screen.getByText('ship'));
   const input = screen.getByRole('textbox', { name: 'Rename ship' });
   expect(input).toHaveValue('ship');
@@ -1756,7 +1793,7 @@ it('renames a todo inline', async () => {
   await user.type(input, ' it{Enter}');
   expect(edit).toHaveBeenLastCalledWith('/proj', {
     type: 'rename',
-    todo: ship,
+    entry: ship,
     text: 'ship it',
   });
   expect(screen.queryByRole('textbox', { name: 'Rename ship' })).toBeNull();
@@ -1767,21 +1804,22 @@ it('renames a todo inline', async () => {
   expect(edit).not.toHaveBeenCalled();
   await user.dblClick(screen.getByText('ship'));
   await user.type(screen.getByLabelText('Rename ship'), ' later');
-  await user.click(screen.getByLabelText('New todo'));
+  await user.click(screen.getByLabelText('New backlog entry'));
   expect(edit).toHaveBeenLastCalledWith('/proj', {
     type: 'rename',
-    todo: ship,
+    entry: ship,
     text: 'ship later',
   });
 });
 
-it('reorders todos by dragging them within their group', async () => {
+it('reorders entries by dragging them within their group', async () => {
   const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((text, line) => ({
     line,
     text,
     done: text === 'd',
   }));
-  const { edit } = await openWithTodos([a, b, c, d]);
+  const { user, edit } = await openWithBacklog([a, b, c, d]);
+  await user.click(screen.getByRole('button', { name: '[ DONE 1 ]' }));
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
     top: 0,
     bottom: 20,
@@ -1789,81 +1827,81 @@ it('reorders todos by dragging them within their group', async () => {
   } as DOMRect);
   const drag = (from: string, to: string, clientY: number) => {
     const dataTransfer = transfer();
-    fireEvent.dragStart(todoRow(from), { dataTransfer });
-    fireEvent.dragOver(todoRow(to), { dataTransfer, clientY });
-    const drop = todoRow(to).getAttribute('data-drop');
-    const dragging = todoRow(from).hasAttribute('data-dragging');
-    fireEvent.drop(todoRow(to), { dataTransfer, clientY });
-    fireEvent.dragEnd(todoRow(from), { dataTransfer });
+    fireEvent.dragStart(entryRow(from), { dataTransfer });
+    fireEvent.dragOver(entryRow(to), { dataTransfer, clientY });
+    const drop = entryRow(to).getAttribute('data-drop');
+    const dragging = entryRow(from).hasAttribute('data-dragging');
+    fireEvent.drop(entryRow(to), { dataTransfer, clientY });
+    fireEvent.dragEnd(entryRow(from), { dataTransfer });
     return { drop, dragging };
   };
   expect(drag('c', 'a', 5)).toEqual({ drop: 'before', dragging: true });
   expect(edit).toHaveBeenLastCalledWith('/proj', {
     type: 'move',
-    todo: c,
+    entry: c,
     before: a,
   });
   expect(drag('a', 'b', 15)).toEqual({ drop: 'after', dragging: true });
   expect(edit).toHaveBeenLastCalledWith('/proj', {
     type: 'move',
-    todo: a,
+    entry: a,
     before: c,
   });
   drag('a', 'c', 15);
   expect(edit).toHaveBeenLastCalledWith('/proj', {
     type: 'move',
-    todo: a,
+    entry: a,
     before: undefined,
   });
-  expect(todoRow('a')).not.toHaveAttribute('data-dragging');
+  expect(entryRow('a')).not.toHaveAttribute('data-dragging');
   edit.mockClear();
   expect(drag('a', 'd', 5).drop).toBeNull();
   expect(edit).not.toHaveBeenCalled();
 });
 
 it('binds the drag end listeners once per drag', async () => {
-  await openWithTodos([{ line: 0, text: 'ship', done: false }]);
+  await openWithBacklog([{ line: 0, text: 'ship', done: false }]);
   const add = vi.spyOn(window, 'addEventListener');
   onTestFinished(() => add.mockRestore());
   const dataTransfer = transfer();
-  fireEvent.dragStart(todoRow('ship'), { dataTransfer });
+  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
   const zone = screen.getByText('[ + NEW THREAD ]');
   fireEvent.dragOver(zone, { dataTransfer });
   fireEvent.dragLeave(zone, { dataTransfer });
   fireEvent.dragOver(zone, { dataTransfer });
-  fireEvent.dragEnd(todoRow('ship'), { dataTransfer });
+  fireEvent.dragEnd(entryRow('ship'), { dataTransfer });
   expect(add.mock.calls.filter(([type]) => type === 'dragend')).toHaveLength(1);
 });
 
-it('ends the drag when its todo leaves the list mid-drag', async () => {
-  await openWithTodos([
+it('ends the drag when its entry leaves the list mid-drag', async () => {
+  await openWithBacklog([
     { line: 0, text: 'ship', done: false },
     { line: 1, text: 'docs', done: false },
   ]);
   const dataTransfer = transfer();
-  fireEvent.dragStart(todoRow('ship'), { dataTransfer });
+  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
   const zone = () => screen.queryByText('[ + NEW THREAD ]');
   fireEvent.dragOver(zone()!, { dataTransfer });
   act(() =>
-    todos.onChange.mock.lastCall![0]('/proj', [
+    backlog.onChange.mock.lastCall![0]('/proj', [
       { line: 0, text: 'docs', done: false },
     ]),
   );
   expect(zone()).toBeNull();
-  fireEvent.dragStart(todoRow('docs'), { dataTransfer });
+  fireEvent.dragStart(entryRow('docs'), { dataTransfer });
   expect(zone()).not.toHaveAttribute('data-over');
 });
 
-it('copies a todo dropped on the chat into the composer', async () => {
-  const { user, edit } = await openWithTodos([
+it('copies a entry dropped on the chat into the composer', async () => {
+  const { user, edit } = await openWithBacklog([
     { line: 0, text: 'ship', done: false },
   ]);
   const box = screen.getByPlaceholderText('Ask the agent…');
   const dropShip = () => {
     const dataTransfer = transfer();
-    fireEvent.dragStart(todoRow('ship'), { dataTransfer });
+    fireEvent.dragStart(entryRow('ship'), { dataTransfer });
     const handled = !fireEvent.drop(box, { dataTransfer });
-    fireEvent.dragEnd(todoRow('ship'), { dataTransfer });
+    fireEvent.dragEnd(entryRow('ship'), { dataTransfer });
     return handled;
   };
   expect(dropShip()).toBe(true);
@@ -1888,21 +1926,21 @@ it('ignores plain text dropped on the chat', async () => {
   expect(box).toHaveValue('');
 });
 
-it('starts a new thread from a todo dropped on the new thread zone', async () => {
-  const { user } = await openWithTodos([
+it('starts a new thread from a entry dropped on the new thread zone', async () => {
+  const { user } = await openWithBacklog([
     { line: 0, text: 'ship', done: false },
   ]);
   const zone = () => screen.queryByText('[ + NEW THREAD ]');
   expect(zone()).toBeNull();
   let dataTransfer = transfer();
-  fireEvent.dragStart(todoRow('ship'), { dataTransfer });
+  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
   expect(zone()).toBeInTheDocument();
-  fireEvent.dragEnd(todoRow('ship'), { dataTransfer });
+  fireEvent.dragEnd(entryRow('ship'), { dataTransfer });
   expect(zone()).toBeNull();
 
   await user.type(screen.getByPlaceholderText('Ask the agent…'), 'busy');
   dataTransfer = transfer();
-  fireEvent.dragStart(todoRow('ship'), { dataTransfer });
+  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
   fireEvent.dragOver(zone()!, { dataTransfer });
   expect(zone()).toHaveAttribute('data-over');
   fireEvent.drop(zone()!, { dataTransfer });
@@ -1915,10 +1953,10 @@ it('starts a new thread from a todo dropped on the new thread zone', async () =>
   expect([box.selectionStart, box.selectionEnd]).toEqual([4, 4]);
 });
 
-it('fills the empty draft from a todo dropped on the new thread zone', async () => {
-  await openWithTodos([{ line: 0, text: 'ship', done: false }]);
+it('fills the empty draft from a entry dropped on the new thread zone', async () => {
+  await openWithBacklog([{ line: 0, text: 'ship', done: false }]);
   const dataTransfer = transfer();
-  fireEvent.dragStart(todoRow('ship'), { dataTransfer });
+  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
   fireEvent.drop(screen.getByText('[ + NEW THREAD ]'), { dataTransfer });
   expect(sidebarTitles()).toEqual(['New thread']);
   const box =
@@ -1928,13 +1966,13 @@ it('fills the empty draft from a todo dropped on the new thread zone', async () 
   expect([box.selectionStart, box.selectionEnd]).toEqual([4, 4]);
 });
 
-it('marks the chat as a drop target while a todo is dragged', async () => {
-  await openWithTodos([{ line: 0, text: 'ship', done: false }]);
+it('marks the chat as a drop target while a entry is dragged', async () => {
+  await openWithBacklog([{ line: 0, text: 'ship', done: false }]);
   const target = () =>
     screen.queryByText('[ + ADD TO PROMPT ]')?.parentElement ?? null;
   expect(target()).toBeNull();
   const dataTransfer = transfer();
-  fireEvent.dragStart(todoRow('ship'), { dataTransfer });
+  fireEvent.dragStart(entryRow('ship'), { dataTransfer });
   expect(target()).toBeInTheDocument();
   expect(target()).not.toHaveAttribute('data-over');
   const box = screen.getByPlaceholderText('Ask the agent…');
@@ -1998,17 +2036,49 @@ it('cycles active threads with Ctrl+Tab, or all of them when chosen', async () =
 
 it('offers an update from settings when one is available', async () => {
   agent.usage.mockResolvedValue(null);
-  update.check.mockResolvedValue(['Settings page', 'Faster todos']);
+  update.check.mockResolvedValue({
+    commits: ['Settings page', 'Faster entries'],
+  });
   const user = await open();
   expect(await screen.findByTitle('Update available')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Settings' }));
   await user.click(screen.getByRole('button', { name: 'Update' }));
-  expect(screen.getByText('Faster todos')).toBeInTheDocument();
+  expect(screen.getByText('Faster entries')).toBeInTheDocument();
   await user.click(
     screen.getByRole('button', { name: '[ UPDATE AND RESTART ]' }),
   );
-  expect(update.install).toHaveBeenCalled();
+  expect(update.install).toHaveBeenCalledWith(expect.any(String));
   expect(screen.getByRole('button', { name: '[ UPDATING ]' })).toBeDisabled();
+});
+
+it('shows why an update could not be pulled and lets it be retried', async () => {
+  agent.usage.mockResolvedValue(null);
+  update.check.mockResolvedValue({ commits: ['Faster todos'] });
+  update.install.mockResolvedValue('fatal: Not possible to fast-forward');
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Update' }));
+  await user.click(
+    screen.getByRole('button', { name: '[ UPDATE AND RESTART ]' }),
+  );
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Not possible to fast-forward',
+  );
+  expect(
+    screen.getByRole('button', { name: '[ UPDATE AND RESTART ]' }),
+  ).toBeEnabled();
+});
+
+it('reports an update that failed to install on the last restart', async () => {
+  agent.usage.mockResolvedValue(null);
+  update.check.mockResolvedValue({
+    commits: ['Faster todos'],
+    error: 'Update failed, see /tmp/zephyr-update.log',
+  });
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Update' }));
+  expect(screen.getByRole('alert')).toHaveTextContent('Update failed');
 });
 
 it('hides the update tab when up to date', async () => {
