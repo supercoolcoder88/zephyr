@@ -190,7 +190,7 @@ export default function Sidebar({
           {(update.commits.length > 0 || update.error) && (
             <span
               title="Update available"
-              className="absolute -top-0.5 -right-0.5 size-1.5 bg-warn"
+              className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-warn"
             />
           )}
         </Button>

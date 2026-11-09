@@ -153,9 +153,12 @@ export default function Settings({
                 type="button"
                 aria-current={section === s ? 'page' : undefined}
                 onClick={() => setSection(s)}
-                className="px-4 py-2 text-left text-sm text-mute transition-colors duration-150 ease-mech hover:bg-line hover:text-ink aria-[current=page]:bg-paper aria-[current=page]:text-void"
+                className="flex items-center gap-2 px-4 py-2 text-left text-sm text-mute transition-colors duration-150 ease-mech hover:bg-line hover:text-ink aria-[current=page]:bg-paper aria-[current=page]:text-void"
               >
                 {s}
+                {s === 'Update' && (
+                  <span className="size-1.5 rounded-full bg-warn" />
+                )}
               </button>
             ))}
         </nav>

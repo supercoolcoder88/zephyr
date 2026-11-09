@@ -46,7 +46,7 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 
 ## Shape and layout
 
-- **Border radius is 0.** `--radius-*` is reset in the theme, so `rounded-*` does nothing. Don't work around it.
+- **Border radius is 0.** `--radius-*` is reset in the theme, so `rounded-*` does nothing. Don't work around it. The one exception is the orange update dot, which is `rounded-full`.
 - Depth comes from 1px borders and inversion. No drop shadows except the cyan glow.
 - Bracket small controls and indices: `[ SEND ]`, `[ + NEW ]`, `01`.
 - Dense spacing on a 4px base. This is a tool, not a landing page.
