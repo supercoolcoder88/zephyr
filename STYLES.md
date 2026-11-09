@@ -10,13 +10,13 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 
 | Token         | Value       | Use                                              |
 | ------------- | ----------- | ------------------------------------------------ |
-| `void`        | `#0E0E0E`   | App background                                   |
-| `panel`       | `#161616`   | Raised surfaces (sidebar, composer)              |
-| `line`        | `#262626`   | 1px hairlines, dividers, grid                    |
-| `line-strong` | `#404040`   | Hover and active borders                         |
-| `mute`        | `#737373`   | Secondary text, indices, metadata                |
+| `void`        | `#100F14`   | App background                                   |
+| `panel`       | `#17151D`   | Raised surfaces (sidebar, composer)              |
+| `line`        | `#26232E`   | 1px hairlines, dividers, grid                    |
+| `line-strong` | `#403C4A`   | Hover and active borders                         |
+| `mute`        | `#77737F`   | Secondary text, indices, metadata                |
 | `ink`         | `#EDEDED`   | Primary text                                     |
-| `paper`       | `#FFFFFF`   | Inverted blocks, primary button                  |
+| `paper`       | `#E8ECF2`   | Inverted blocks, primary button                  |
 | `cyan`        | `#00E5FF`   | Key moments only                                 |
 | `cyan-deep`   | `#0066FF`   | Glow falloff behind cyan                         |
 | `blue`        | `#61AFEF`   | Bold text in agent output only                   |
@@ -42,6 +42,7 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 - Sizes: 11 / 13 / 16 / 24 / 48 px (`text-2xs`, `text-sm`, `text-base`, `text-2xl`, `text-5xl`). Avoid in-between sizes.
 - Small labels and controls: 11px, uppercase, `tracking-widest`.
 - Headings: uppercase, wide tracking, regular-to-medium weight. Bold is rare.
+- Big against small: 48px is for one uppercase statement or a key number per view (empty thread, settings section title, usage), always paired with 11px labels. Skip the sizes between them there.
 
 ## Shape and layout
 

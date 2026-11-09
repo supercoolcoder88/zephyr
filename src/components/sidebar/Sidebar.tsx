@@ -206,7 +206,6 @@ export default function Sidebar({
       </footer>
       {settingsOpen && (
         <Settings
-          workspace={workspace}
           permission={permission}
           onPermission={onPermission}
           updates={updates}

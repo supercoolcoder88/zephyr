@@ -135,7 +135,7 @@ export interface AgentApi {
   interrupt(runId: string): Promise<void>;
   close(runId: string): Promise<void>;
   // Null when plan rate limits don't apply, e.g. API key auth.
-  usage(cwd: string): Promise<UsageWindow[] | null>;
+  usage(): Promise<UsageWindow[] | null>;
   onEvent(listener: (runId: string, event: AgentEvent) => void): () => void;
   listThreads(
     cwd: string,

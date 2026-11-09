@@ -6,7 +6,7 @@ import {
   type WebContents,
 } from 'electron';
 import { watch } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type {
@@ -219,11 +219,7 @@ function watchSkills(cwd: string) {
         w.webContents.send('agent:catalog-change', cwd);
     }, 500);
   };
-  const roots = [
-    process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'),
-    path.join(cwd, '.claude'),
-  ];
-  for (const root of roots) {
+  for (const root of [userDir(), path.join(cwd, '.claude')]) {
     const watching = new Set<string>();
     const attach = () => {
       for (const name of ['skills', 'commands']) {
@@ -246,15 +242,148 @@ function watchSkills(cwd: string) {
   }
 }
 
-// Skills and usage only come from a live CLI, so start one that never gets a prompt.
-async function idleQuery(cwd: string) {
+const userDir = () =>
+  process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude');
+
+const frontmatter = (text: string): Record<string, string | undefined> =>
+  Object.fromEntries(
+    [
+      ...(/^---\r?\n([\s\S]*?)\r?\n---/
+        .exec(text)?.[1]
+        .matchAll(/^([\w-]+):(.*(?:\r?\n[ \t]+.*)*)/gm) ?? []),
+    ].map(([, key, value]) => [
+      key,
+      value
+        .replace(/^\s*[>|][-+]?/, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^(['"])(.*)\1$/, '$2'),
+    ]),
+  );
+
+// Same layout Claude Code reads: skills/<name>/SKILL.md and commands/**/*.md, where subfolders namespace with ':'.
+async function diskCommands(cwd: string) {
+  const found: SlashCommand[] = [];
+  const add = async (file: string, fallback: string) => {
+    const text = await readFile(file, 'utf8').catch(() => '');
+    if (!text) return;
+    const meta = frontmatter(text);
+    found.push({
+      name: meta.name || fallback,
+      description:
+        meta.description ??
+        text
+          .replace(/^---[\s\S]*?\n---/, '')
+          .trim()
+          .split('\n')[0],
+      argumentHint: meta['argument-hint'] ?? '',
+    });
+  };
+  for (const root of [userDir(), path.join(cwd, '.claude')]) {
+    const skills = path.join(root, 'skills');
+    const commands = path.join(root, 'commands');
+    await Promise.all([
+      ...(await readdir(skills).catch(() => [])).map((d) =>
+        add(path.join(skills, d, 'SKILL.md'), d),
+      ),
+      ...(await readdir(commands, { recursive: true }).catch(() => []))
+        .filter((f) => f.endsWith('.md'))
+        .map((f) =>
+          add(path.join(commands, f), f.slice(0, -3).split(path.sep).join(':')),
+        ),
+    ]);
+  }
+  return found;
+}
+
+// Built-in commands, plugin skills and models only come from a live CLI, so one runs once per app launch.
+async function cliCatalog() {
   const { query } = await loadSdk();
-  return query({
+  const idle = query({
     prompt: {
       [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
     } as AsyncIterable<SDKUserMessage>,
-    options: options(cwd),
+    options: options(os.homedir()),
   });
+  try {
+    const [commands, models, onDisk] = await Promise.all([
+      idle.supportedCommands(),
+      idle.supportedModels(),
+      diskCommands(os.homedir()),
+    ]);
+    // getSettings is in the SDK runtime but not its types.
+    const { getSettings } = idle as unknown as {
+      getSettings(): Promise<{ applied: { effort: Effort | null } }>;
+    };
+    const families: Model[] = [];
+    // Family aliases like 'opus' always resolve to the latest version.
+    for (const m of models) {
+      if (m.value === 'default' || m.value.includes('-')) continue;
+      // Switching the idle session's model reveals the effort Claude Code would pick for it.
+      // Models the plan can't switch to (e.g. credit-only) still list, without a default.
+      const effort = await idle
+        .setModel(m.value)
+        .then(() => getSettings.call(idle))
+        .then(
+          ({ applied }) => applied.effort,
+          () => null,
+        );
+      families.push({
+        value: m.value,
+        displayName: m.displayName,
+        efforts: m.supportedEffortLevels ?? [],
+        defaultEffort: effort ?? undefined,
+      });
+    }
+    // Skills on disk are re-read per request, so the CLI's startup copy of them is dropped.
+    const disk = new Set(onDisk.map((c) => c.name));
+    return {
+      commands: commands
+        .filter(
+          (c) => !c.name.startsWith('_') && (c.builtin || !disk.has(c.name)),
+        )
+        .map(({ name, description, argumentHint }) => ({
+          name,
+          description,
+          argumentHint,
+        })),
+      models: families,
+    };
+  } finally {
+    idle.close();
+  }
+}
+
+let catalog: ReturnType<typeof cliCatalog> | undefined;
+let usage: UsageWindow[] | null = null;
+
+async function refreshUsage(q: Query) {
+  const { rate_limits } =
+    await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
+      skipBehaviors: true,
+    });
+  usage = rate_limits
+    ? [
+        { label: '5 hour', window: rate_limits.five_hour },
+        { label: 'Week', window: rate_limits.seven_day },
+        { label: 'Week opus', window: rate_limits.seven_day_opus },
+        { label: 'Week sonnet', window: rate_limits.seven_day_sonnet },
+        ...(rate_limits.model_scoped ?? []).map((w) => ({
+          label: `Week ${w.display_name}`,
+          window: w,
+        })),
+      ].flatMap(({ label, window }) =>
+        window?.utilization == null
+          ? []
+          : [
+              {
+                label,
+                utilization: window.utilization,
+                resetsAt: window.resets_at,
+              },
+            ],
+      )
+    : null;
 }
 
 export function registerAgentIpc() {
@@ -428,6 +557,7 @@ export function registerAgentIpc() {
                   send(target, runId, { type: 'context', percentage }),
                 )
                 .catch(() => {});
+              refreshUsage(q).catch(() => {});
             }
           }
         } catch (err) {
@@ -639,87 +769,23 @@ export function registerAgentIpc() {
       cwd: string,
     ): Promise<{ commands: SlashCommand[]; models: Model[] }> => {
       watchSkills(cwd);
-      const idle = await idleQuery(cwd);
-      try {
-        // supportedCommands also lists skills only the user can invoke; reloading first picks up new ones on disk.
-        const [commands, models] = await Promise.all([
-          idle.reloadSkills().then(() => idle.supportedCommands()),
-          idle.supportedModels(),
-        ]);
-        // getSettings is in the SDK runtime but not its types.
-        const { getSettings } = idle as unknown as {
-          getSettings(): Promise<{ applied: { effort: Effort | null } }>;
-        };
-        const families: Model[] = [];
-        // Family aliases like 'opus' always resolve to the latest version.
-        for (const m of models) {
-          if (m.value === 'default' || m.value.includes('-')) continue;
-          // Switching the idle session's model reveals the effort Claude Code would pick for it.
-          // Models the plan can't switch to (e.g. credit-only) still list, without a default.
-          const effort = await idle
-            .setModel(m.value)
-            .then(() => getSettings.call(idle))
-            .then(
-              ({ applied }) => applied.effort,
-              () => null,
-            );
-          families.push({
-            value: m.value,
-            displayName: m.displayName,
-            efforts: m.supportedEffortLevels ?? [],
-            defaultEffort: effort ?? undefined,
-          });
-        }
-        return {
-          commands: commands
-            .filter((c) => !c.name.startsWith('_'))
-            .map(({ name, description, argumentHint }) => ({
-              name,
-              description,
-              argumentHint,
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name)),
-          models: families,
-        };
-      } finally {
-        idle.close();
-      }
+      catalog ??= cliCatalog().catch((err) => {
+        catalog = undefined;
+        throw err;
+      });
+      const [cli, disk] = await Promise.all([catalog, diskCommands(cwd)]);
+      const byName = new Map(
+        [...cli.commands, ...disk].map((c) => [c.name, c]),
+      );
+      return {
+        commands: [...byName.values()].sort((a, b) =>
+          a.name.localeCompare(b.name),
+        ),
+        models: cli.models,
+      };
     },
   );
 
-  ipcMain.handle(
-    'agent:usage',
-    async (_, cwd: string): Promise<UsageWindow[] | null> => {
-      const idle = await idleQuery(cwd);
-      try {
-        const { rate_limits } =
-          await idle.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
-            skipBehaviors: true,
-          });
-        if (!rate_limits) return null;
-        return [
-          { label: '5 hour', window: rate_limits.five_hour },
-          { label: 'Week', window: rate_limits.seven_day },
-          { label: 'Week opus', window: rate_limits.seven_day_opus },
-          { label: 'Week sonnet', window: rate_limits.seven_day_sonnet },
-          ...(rate_limits.model_scoped ?? []).map((w) => ({
-            label: `Week ${w.display_name}`,
-            window: w,
-          })),
-        ].flatMap(({ label, window }) =>
-          window?.utilization == null
-            ? []
-            : [
-                {
-                  label,
-                  utilization: window.utilization,
-                  resetsAt: window.resets_at,
-                },
-              ],
-        );
-      } finally {
-        idle.close();
-      }
-    },
-  );
+  // Refreshed from a thread's own session after each reply, so reading it never starts a CLI.
+  ipcMain.handle('agent:usage', () => usage);
 }

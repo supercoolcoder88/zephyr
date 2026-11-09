@@ -5,7 +5,6 @@ import Button from '../ui/Button';
 import useDismiss from '../ui/useDismiss';
 
 interface Props {
-  workspace: string;
   permission: Permission;
   onPermission(permission: Permission): void;
   updates: string[];
@@ -86,7 +85,6 @@ function Segmented({
 }
 
 export default function Settings({
-  workspace,
   permission,
   onPermission,
   updates,
@@ -116,7 +114,7 @@ export default function Settings({
   useEffect(() => {
     if (section !== 'Usage' || usage !== undefined) return;
     setUsage('loading');
-    window.agent.usage(workspace).then(setUsage, () => setUsage('error'));
+    window.agent.usage().then(setUsage, () => setUsage('error'));
   }, [section]);
 
   function pickTheme(next: string) {
@@ -150,8 +148,10 @@ export default function Settings({
             ))}
         </nav>
         <section className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-6">
-            <h2 className="text-2xs tracking-widest uppercase">{section}</h2>
+          <header className="flex shrink-0 items-start justify-between border-b border-line px-6 py-6">
+            <h2 className="text-5xl font-medium tracking-widest uppercase">
+              {section}
+            </h2>
             <Button ref={close} aria-label="Close" onClick={onClose}>
               <X
                 size={14}
@@ -204,27 +204,30 @@ export default function Settings({
                 <p className="py-3 text-sm text-mute">No plan limits</p>
               ) : (
                 usage.map((w) => (
-                  <Row
-                    key={w.label}
-                    name={w.label}
-                    hint={
-                      w.resetsAt
-                        ? `Resets ${new Date(w.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
-                        : undefined
-                    }
-                  >
-                    <div className="flex w-48 items-center gap-3 text-2xs tracking-widest">
-                      <div className="h-1 flex-1 bg-line">
-                        <div
-                          className={`h-full ${w.utilization >= 90 ? 'bg-alert' : 'bg-ink'}`}
-                          style={{ width: `${Math.min(w.utilization, 100)}%` }}
-                        />
-                      </div>
-                      <span className="w-10 text-right">
-                        {Math.round(w.utilization)}%
-                      </span>
+                  <div key={w.label} className="border-b border-line py-4">
+                    <div className="flex justify-between text-2xs tracking-widest text-mute uppercase">
+                      <span>{w.label}</span>
+                      {w.resetsAt && (
+                        <span>
+                          Resets{' '}
+                          {new Date(w.resetsAt).toLocaleString(undefined, {
+                            weekday: 'short',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      )}
                     </div>
-                  </Row>
+                    <p className="my-2 text-5xl font-medium">
+                      {Math.round(w.utilization)}%
+                    </p>
+                    <div className="h-1 bg-line">
+                      <div
+                        className={`h-full ${w.utilization >= 90 ? 'bg-alert' : 'bg-ink'}`}
+                        style={{ width: `${Math.min(w.utilization, 100)}%` }}
+                      />
+                    </div>
+                  </div>
                 ))
               ))}
             {section === 'Update' && (

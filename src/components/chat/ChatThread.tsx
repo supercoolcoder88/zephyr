@@ -121,9 +121,12 @@ export default function ChatThread({
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6"
       >
         {turns.length === 0 ? (
-          <p className="pt-24 text-center text-2xs tracking-widest text-mute">
-            NO MESSAGES YET
-          </p>
+          <div className="flex flex-col items-center gap-2 pt-24">
+            <p className="text-5xl font-medium tracking-widest">READY</p>
+            <p className="text-2xs tracking-widest text-mute">
+              NO MESSAGES YET
+            </p>
+          </div>
         ) : (
           <div className="mx-auto max-w-4xl space-y-6">
             {turns.map((turn, t) => {

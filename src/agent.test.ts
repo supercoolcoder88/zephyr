@@ -247,6 +247,11 @@ function fakeQuery({ prompt }: { prompt: AsyncIterable<unknown> }) {
     applyFlagSettings: vi.fn(async () => undefined),
     setPermissionMode: vi.fn(async () => undefined),
     getContextUsage: vi.fn(async () => ({ percentage: 12 })),
+    usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: vi.fn(
+      async () => ({
+        rate_limits: { five_hour: { utilization: 40, resets_at: null } },
+      }),
+    ),
     close: vi.fn(() => q.step({ error: new Error('aborted') })),
     async *[Symbol.asyncIterator]() {
       while (true) {
@@ -381,6 +386,25 @@ describe('agent:send', () => {
     await expect(handlers.get('agent:interrupt')!({}, 'none')).resolves.toBe(
       undefined,
     );
+  });
+
+  it('reads usage from the thread session after a reply without starting a CLI', async () => {
+    const s = sender();
+    await send(s, 'u1', 'go');
+    lastQuery().step({
+      value: {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: 'ok',
+      },
+    });
+    await vi.waitFor(async () =>
+      expect(await invoke('agent:usage')).toEqual([
+        { label: '5 hour', utilization: 40, resetsAt: null },
+      ]),
+    );
+    expect(sdk.query).toHaveBeenCalledTimes(1);
   });
 
   it('forwards session, blocks, subagent traffic and session state', async () => {
@@ -787,26 +811,62 @@ describe('agent:send', () => {
   });
 });
 
-describe('idle queries', () => {
-  it.each(['agent:catalog', 'agent:usage'])(
-    '%s never bypasses permissions',
-    async (channel) => {
-      sdk.query.mockReturnValueOnce({
-        reloadSkills: async () => ({ skills: [] }),
-        supportedCommands: async () => [],
-        supportedModels: async () => [],
-        usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET:
-          async () => ({
-            rate_limits: null,
-          }),
-        close: vi.fn(),
-      });
-      await invoke(channel, '/proj');
-      expect(sdk.query.mock.lastCall![0].options.permissionMode).toBe(
-        'default',
-      );
-    },
-  );
+describe('agent:catalog', () => {
+  it('starts one CLI per app run and re-reads skills from disk each time', async () => {
+    const { mkdtemp, mkdir, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const path = await import('node:path');
+    const root = await mkdtemp(path.join(tmpdir(), 'zephyr-'));
+    const user = path.join(root, 'user');
+    const proj = path.join(root, 'proj');
+    process.env.CLAUDE_CONFIG_DIR = user;
+    await mkdir(path.join(user, 'skills', 'mine'), { recursive: true });
+    await writeFile(
+      path.join(user, 'skills', 'mine', 'SKILL.md'),
+      '---\nname: mine\ndescription: >\n  User\n  skill\n---\nbody',
+    );
+    await mkdir(path.join(proj, '.claude', 'commands', 'git'), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(proj, '.claude', 'commands', 'git', 'ship.md'),
+      '---\nargument-hint: <branch>\n---\nShip it\n',
+    );
+    const close = vi.fn();
+    sdk.query.mockReturnValueOnce({
+      supportedCommands: async () => [
+        {
+          name: 'compact',
+          description: 'Compact',
+          argumentHint: '',
+          builtin: true,
+        },
+        { name: 'mine', description: 'From startup', argumentHint: '' },
+      ],
+      supportedModels: async () => [],
+      close,
+    });
+
+    const first = await invoke('agent:catalog', proj);
+    expect(first).toEqual({
+      commands: [
+        { name: 'compact', description: 'Compact', argumentHint: '' },
+        { name: 'git:ship', description: 'Ship it', argumentHint: '<branch>' },
+        { name: 'mine', description: 'User skill', argumentHint: '' },
+      ],
+      models: [],
+    });
+    expect(close).toHaveBeenCalled();
+    expect(sdk.query.mock.lastCall![0].options.permissionMode).toBe('default');
+
+    await rm(path.join(user, 'skills', 'mine'), { recursive: true });
+    const later = await invoke('agent:catalog', path.join(root, 'other'));
+    expect(later).toEqual({
+      commands: [{ name: 'compact', description: 'Compact', argumentHint: '' }],
+      models: [],
+    });
+    expect(sdk.query).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('workspace:complete', () => {

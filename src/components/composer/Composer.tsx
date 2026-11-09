@@ -16,7 +16,7 @@ import type {
 import Button from '../ui/Button';
 import ModelPicker from './ModelPicker';
 
-// Listing commands and models spawns a CLI, so do it once per workspace until its skills change.
+// Cached per workspace until its skills change on disk.
 const catalogs = new Map<string, ReturnType<AgentApi['catalog']>>();
 
 const imageTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];

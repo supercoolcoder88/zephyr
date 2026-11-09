@@ -3,13 +3,13 @@
 
 /* Tokens and rules are documented in STYLES.md. */
 @theme {
-  --color-void: #0e0e0e;
-  --color-panel: #161616;
-  --color-line: #262626;
-  --color-line-strong: #404040;
-  --color-mute: #737373;
+  --color-void: #100f14;
+  --color-panel: #17151d;
+  --color-line: #26232e;
+  --color-line-strong: #403c4a;
+  --color-mute: #77737f;
   --color-ink: #ededed;
-  --color-paper: #fff;
+  --color-paper: #e8ecf2;
   --color-cyan: #00e5ff;
   --color-cyan-deep: #0066ff;
   --color-blue: #61afef;
@@ -83,7 +83,7 @@
   --color-line-strong: #2b4482;
   --color-mute: #7289bd;
   --color-ink: #f2f6ff;
-  --color-paper: #fff;
+  --color-paper: #e6ecf7;
   --color-cyan: #00e5ff;
   --color-cyan-deep: #2f6bff;
   --color-blue: #61afef;

@@ -34,7 +34,7 @@ const agent: AgentApi = {
   catalog: (cwd) => ipcRenderer.invoke('agent:catalog', cwd),
   interrupt: (runId) => ipcRenderer.invoke('agent:interrupt', runId),
   close: (runId) => ipcRenderer.invoke('agent:close', runId),
-  usage: (cwd) => ipcRenderer.invoke('agent:usage', cwd),
+  usage: () => ipcRenderer.invoke('agent:usage'),
   listThreads: (cwd) => ipcRenderer.invoke('threads:list', cwd),
   loadThread: (sessionId, cwd) =>
     ipcRenderer.invoke('threads:load', sessionId, cwd),
