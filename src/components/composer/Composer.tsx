@@ -16,7 +16,7 @@ import type {
 import Button from '../ui/Button';
 import ModelPicker from './ModelPicker';
 
-// Listing commands and models spawns a CLI, so do it once per workspace.
+// Listing commands and models spawns a CLI, so do it once per workspace until its skills change.
 const catalogs = new Map<string, ReturnType<AgentApi['catalog']>>();
 
 const imageTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
@@ -78,6 +78,7 @@ export default function Composer({
 }: Props) {
   const [tooBig, setTooBig] = useState(false);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
+  const [catalogStale, setCatalogStale] = useState(0);
   // Cached so the composer shows the model and effort before the catalog loads.
   const [models, setModels] = useState<Model[]>(() =>
     JSON.parse(localStorage.getItem('models') ?? '[]'),
@@ -152,7 +153,16 @@ export default function Composer({
     return () => {
       live = false;
     };
-  }, [cwd]);
+  }, [cwd, catalogStale]);
+
+  useEffect(
+    () =>
+      window.agent.onCatalogChange((dir) => {
+        catalogs.delete(dir);
+        if (dir === cwd) setCatalogStale((n) => n + 1);
+      }),
+    [cwd],
+  );
 
   // Paths are re-checked as the prompt changes, so files the agent creates light up too.
   useEffect(() => {

@@ -5,6 +5,7 @@ import {
   ipcMain,
   type WebContents,
 } from 'electron';
+import { watch } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -190,6 +191,59 @@ function storedAnswers(input: unknown, text: string) {
         : [[question, text.slice(start, end)]];
     }),
   );
+}
+
+// Saved slash commands are tag markup; subagent hand-backs and local command output aren't the user's words.
+function shownText(text: string) {
+  const name = /<command-name>(.*?)<\/command-name>/.exec(text)?.[1];
+  if (name)
+    return `${name} ${/<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1] ?? ''}`.trim();
+  return /^<(task-notification|agent-message|local-command-[a-z]+)[\s>]/.test(
+    text,
+  )
+    ? []
+    : text;
+}
+
+const watchedSkills = new Set<string>();
+
+// Tells renderers to refetch cwd's catalog when a user or project skill or command changes on disk.
+function watchSkills(cwd: string) {
+  if (watchedSkills.has(cwd)) return;
+  watchedSkills.add(cwd);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const changed = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      for (const w of BrowserWindow.getAllWindows())
+        w.webContents.send('agent:catalog-change', cwd);
+    }, 500);
+  };
+  const roots = [
+    process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'),
+    path.join(cwd, '.claude'),
+  ];
+  for (const root of roots) {
+    const watching = new Set<string>();
+    const attach = () => {
+      for (const name of ['skills', 'commands']) {
+        if (watching.has(name)) continue;
+        try {
+          watch(path.join(root, name), { recursive: true }, changed);
+          watching.add(name);
+        } catch {}
+      }
+    };
+    attach();
+    // A skills or commands folder created later gets watched once it appears.
+    try {
+      watch(root, (_, file) => {
+        if (file !== 'skills' && file !== 'commands') return;
+        attach();
+        changed();
+      });
+    } catch {}
+  }
 }
 
 // Skills and usage only come from a live CLI, so start one that never gets a prompt.
@@ -528,10 +582,11 @@ export function registerAgentIpc() {
               }[];
         };
         const blocks = typeof content === 'string' ? [] : content;
-        const texts =
+        const texts = (
           typeof content === 'string'
             ? [content]
-            : blocks.flatMap((b) => (b.type === 'text' ? [b.text!] : []));
+            : blocks.flatMap((b) => (b.type === 'text' ? [b.text!] : []))
+        ).flatMap(shownText);
         const images = blocks.flatMap((b): Image[] =>
           b.type === 'image' && b.source?.type === 'base64'
             ? [{ mediaType: b.source.media_type, data: b.source.data }]
@@ -583,6 +638,7 @@ export function registerAgentIpc() {
       _,
       cwd: string,
     ): Promise<{ commands: SlashCommand[]; models: Model[] }> => {
+      watchSkills(cwd);
       const idle = await idleQuery(cwd);
       try {
         // supportedCommands also lists skills only the user can invoke; reloading first picks up new ones on disk.

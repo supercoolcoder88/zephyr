@@ -8,10 +8,11 @@ interface Props {
   workspace: string;
   permission: Permission;
   onPermission(permission: Permission): void;
+  updates: string[];
   onClose(): void;
 }
 
-const sections = ['Appearance', 'Agent', 'Usage', 'Hotkeys'] as const;
+const sections = ['Appearance', 'Agent', 'Usage', 'Hotkeys', 'Update'] as const;
 
 const themes = ['dark', 'cyber', 'light'];
 
@@ -42,7 +43,7 @@ function Row({
 }: {
   name: string;
   hint?: string;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <div className="flex items-center gap-6 border-b border-line py-3">
@@ -88,12 +89,14 @@ export default function Settings({
   workspace,
   permission,
   onPermission,
+  updates,
   onClose,
 }: Props) {
   const [section, setSection] =
     useState<(typeof sections)[number]>('Appearance');
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
   const [cycle, setCycle] = useState(localStorage.getItem('cycle') ?? 'active');
+  const [installing, setInstalling] = useState(false);
   const [usage, setUsage] = useState<
     'loading' | 'error' | UsageWindow[] | null
   >();
@@ -132,17 +135,19 @@ export default function Settings({
         className="flex h-full max-h-120 w-full max-w-3xl border border-line-strong bg-void"
       >
         <nav className="flex w-44 shrink-0 flex-col border-r border-line bg-panel py-2">
-          {sections.map((s) => (
-            <button
-              key={s}
-              type="button"
-              aria-current={section === s ? 'page' : undefined}
-              onClick={() => setSection(s)}
-              className="px-4 py-2 text-left text-sm text-mute transition-colors duration-150 ease-mech hover:bg-line hover:text-ink aria-[current=page]:bg-paper aria-[current=page]:text-void"
-            >
-              {s}
-            </button>
-          ))}
+          {sections
+            .filter((s) => s !== 'Update' || updates.length)
+            .map((s) => (
+              <button
+                key={s}
+                type="button"
+                aria-current={section === s ? 'page' : undefined}
+                onClick={() => setSection(s)}
+                className="px-4 py-2 text-left text-sm text-mute transition-colors duration-150 ease-mech hover:bg-line hover:text-ink aria-[current=page]:bg-paper aria-[current=page]:text-void"
+              >
+                {s}
+              </button>
+            ))}
         </nav>
         <section className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-6">
@@ -222,6 +227,25 @@ export default function Settings({
                   </Row>
                 ))
               ))}
+            {section === 'Update' && (
+              <>
+                {updates.map((subject, i) => (
+                  <Row key={i} name={subject} />
+                ))}
+                <Button
+                  variant="primary"
+                  size="md"
+                  disabled={installing}
+                  onClick={() => {
+                    setInstalling(true);
+                    window.update.install();
+                  }}
+                  className="my-4"
+                >
+                  {installing ? '[ UPDATING ]' : '[ UPDATE AND RESTART ]'}
+                </Button>
+              </>
+            )}
             {section === 'Hotkeys' && (
               <>
                 <Row

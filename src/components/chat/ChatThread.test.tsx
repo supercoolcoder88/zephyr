@@ -19,6 +19,7 @@ beforeEach(() => {
   window.agent = {
     catalog: async () => ({ commands: [], models: [] }),
     paths: async () => ({}),
+    onCatalogChange: () => () => undefined,
   } as unknown as typeof window.agent;
 });
 

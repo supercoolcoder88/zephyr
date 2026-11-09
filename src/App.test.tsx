@@ -88,10 +88,13 @@ const agent = {
   loadThread: vi.fn(),
   deleteThread: vi.fn(),
   catalog: vi.fn(),
+  onCatalogChange: vi.fn(),
   paths: vi.fn(),
   setPermission: vi.fn(),
   answerPermission: vi.fn(),
 };
+let catalogListener: (cwd: string) => void;
+const update = { check: vi.fn(), install: vi.fn() };
 const todos = {
   watch: vi.fn<TodoApi['watch']>(),
   edit: vi.fn<TodoApi['edit']>(),
@@ -140,6 +143,12 @@ beforeEach(() => {
   todos.edit.mockReset();
   todos.onChange.mockImplementation(() => () => undefined);
   window.todos = todos;
+  agent.onCatalogChange.mockImplementation((l) => {
+    catalogListener = l;
+    return () => undefined;
+  });
+  update.check.mockResolvedValue([]);
+  window.update = update;
   Element.prototype.scrollIntoView = () => undefined;
 });
 
@@ -1985,4 +1994,41 @@ it('cycles active threads with Ctrl+Tab, or all of them when chosen', async () =
   await user.keyboard('{Escape}');
   await user.keyboard('{Control>}{Shift>}{Tab}{/Shift}{/Control}');
   expect(heading()).toBe('Older');
+});
+
+it('offers an update from settings when one is available', async () => {
+  agent.usage.mockResolvedValue(null);
+  update.check.mockResolvedValue(['Settings page', 'Faster todos']);
+  const user = await open();
+  expect(await screen.findByTitle('Update available')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Update' }));
+  expect(screen.getByText('Faster todos')).toBeInTheDocument();
+  await user.click(
+    screen.getByRole('button', { name: '[ UPDATE AND RESTART ]' }),
+  );
+  expect(update.install).toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '[ UPDATING ]' })).toBeDisabled();
+});
+
+it('hides the update tab when up to date', async () => {
+  agent.usage.mockResolvedValue(null);
+  const user = await open();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  expect(screen.queryByTitle('Update available')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Update' })).toBeNull();
+});
+
+it('picks up skills added while the app is open', async () => {
+  agent.pickWorkspace.mockResolvedValue('/skills');
+  const user = await open();
+  agent.catalog.mockResolvedValue({
+    commands: [{ name: 'deslop', description: 'Clean up', argumentHint: '' }],
+    models: [],
+  });
+  act(() => catalogListener('/skills'));
+  await user.type(screen.getByPlaceholderText('Ask the agent…'), '/');
+  expect(
+    await screen.findByRole('option', { name: /deslop/ }),
+  ).toBeInTheDocument();
 });

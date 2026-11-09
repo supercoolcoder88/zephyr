@@ -3,6 +3,7 @@ import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { registerAgentIpc } from './agent';
 import { registerTodoIpc } from './todos';
+import { registerUpdateIpc } from './update';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -63,6 +64,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   registerAgentIpc();
   registerTodoIpc();
+  registerUpdateIpc();
   createWindow();
 
   // On OS X it's common to re-create a window in the app when the

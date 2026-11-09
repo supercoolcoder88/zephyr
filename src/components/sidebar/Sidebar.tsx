@@ -46,6 +46,11 @@ export default function Sidebar({
   const [confirmId, setConfirmId] = useState<string>();
   const [showArchived, setShowArchived] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [updates, setUpdates] = useState<string[]>([]);
+
+  useEffect(() => {
+    window.update.check().then(setUpdates, () => {});
+  }, []);
 
   const lastRead = useRef<string>(undefined);
   useEffect(() => () => void (lastRead.current = activeId), [activeId]);
@@ -179,8 +184,15 @@ export default function Sidebar({
           aria-label="Settings"
           aria-expanded={settingsOpen}
           onClick={() => setSettingsOpen(true)}
+          className="relative"
         >
           <SettingsIcon {...icon} />
+          {updates.length > 0 && (
+            <span
+              title="Update available"
+              className="absolute -top-0.5 -right-0.5 size-1.5 bg-warn"
+            />
+          )}
         </Button>
         <Button
           title={workspace}
@@ -197,6 +209,7 @@ export default function Sidebar({
           workspace={workspace}
           permission={permission}
           onPermission={onPermission}
+          updates={updates}
           onClose={() => setSettingsOpen(false)}
         />
       )}

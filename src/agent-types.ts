@@ -127,6 +127,8 @@ export interface AgentApi {
     candidates: string[],
   ): Promise<Record<string, 'file' | 'folder'>>;
   catalog(cwd: string): Promise<{ commands: SlashCommand[]; models: Model[] }>;
+  // Fires with the workspace whose skills or commands changed on disk.
+  onCatalogChange(listener: (cwd: string) => void): () => void;
   // Entries of the folder in partial (relative to cwd) whose names start with its last segment; folders end in '/'.
   complete(cwd: string, partial: string): Promise<string[]>;
   // Stops the running turn and cancels every queued message.
@@ -163,4 +165,11 @@ export interface TodoApi {
   watch(cwd: string): Promise<Todo[]>;
   edit(cwd: string, edit: TodoEdit): Promise<Todo[]>;
   onChange(listener: (cwd: string, todos: Todo[]) => void): () => void;
+}
+
+export interface UpdateApi {
+  // Subjects of the commits available upstream, empty when up to date.
+  check(): Promise<string[]>;
+  // Quits, installs the update and relaunches.
+  install(): Promise<void>;
 }

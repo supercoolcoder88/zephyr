@@ -175,6 +175,33 @@ describe('threads:load', () => {
       },
     ]);
   });
+
+  it('shows saved slash commands as typed and hides injected messages', async () => {
+    sdk.getSessionMessages.mockResolvedValue([
+      message(
+        'user',
+        '<command-message>deslop</command-message>\n<command-name>/deslop</command-name>\n<command-args>the repo</command-args>',
+      ),
+      message(
+        'user',
+        '<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>',
+      ),
+      message('user', '<local-command-stdout>Cleared</local-command-stdout>'),
+      message('user', [
+        {
+          type: 'text',
+          text: '<task-notification>\n<task-id>a1</task-id>\n</task-notification>',
+        },
+      ]),
+      message('user', '<agent-message from="a1">report</agent-message>'),
+      message('user', '<b>bold</b> is fine'),
+    ]);
+    expect(await invoke('threads:load', 'sid', '/proj')).toEqual([
+      { type: 'user', text: '/deslop the repo' },
+      { type: 'user', text: '/clear' },
+      { type: 'user', text: '<b>bold</b> is fine' },
+    ]);
+  });
 });
 
 describe('threads:delete', () => {

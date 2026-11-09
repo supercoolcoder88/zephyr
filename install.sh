@@ -30,7 +30,7 @@ elif [ -n "\${1:-}" ]; then
   [ -d "\$1" ] || { echo "zephyr: \$1 is not a directory" >&2; exit 1; }
   set -- "\$(realpath "\$1")"
 fi
-setsid "$dest/zephyr" "\$@" >/dev/null 2>&1 &
+ZEPHYR_SOURCE="$PWD" setsid "$dest/zephyr" "\$@" >/dev/null 2>&1 &
 LAUNCHER
 chmod +x "$bin/zephyr"
 
