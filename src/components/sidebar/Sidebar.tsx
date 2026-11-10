@@ -4,13 +4,15 @@ import {
   ChevronDown,
   ChevronRight,
   GitBranch,
+  Pin,
+  PinOff,
   Plus,
   Settings as SettingsIcon,
   X,
 } from 'lucide-react';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { Permission, UpdateStatus } from '../../agent-types';
-import { stateDot, threadState, type Thread } from '../../thread';
+import { stateDot, threadState, type Pins, type Thread } from '../../thread';
 import Button from '../ui/Button';
 import Settings from '../settings/Settings';
 
@@ -24,6 +26,8 @@ interface Props {
   current: Thread[];
   archived: Thread[];
   onArchive(id: string, value: boolean): void;
+  pinned: Pins;
+  onPin(id: string, value: boolean): void;
   activeId: string;
   runningIds: string[];
   onSelect(id: string): void;
@@ -53,6 +57,8 @@ export default function Sidebar({
   current,
   archived,
   onArchive,
+  pinned,
+  onPin,
   activeId,
   runningIds,
   onSelect,
@@ -116,6 +122,7 @@ export default function Sidebar({
   function row(thread: Thread, isArchived = false) {
     const active = thread.id === activeId;
     const confirming = confirmId === thread.id;
+    const isPinned = thread.id in pinned;
     return (
       <div
         key={thread.key ?? thread.id}
@@ -148,6 +155,14 @@ export default function Sidebar({
               </span>
             )}
           </span>
+          {isPinned && (
+            <Pin
+              {...icon}
+              role="img"
+              aria-label="Pinned"
+              className={`shrink-0 ${active ? 'text-void/50' : 'text-mute'}`}
+            />
+          )}
           {thread.worktree && (
             <span
               title={thread.branch}
@@ -169,6 +184,16 @@ export default function Sidebar({
                 : `opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 ${active ? 'text-void/50' : 'text-mute'}`
             }`}
           >
+            {!confirming && !thread.draft && !isArchived && (
+              <button
+                type="button"
+                aria-label={isPinned ? 'Unpin' : 'Pin'}
+                onClick={() => onPin(thread.id, !isPinned)}
+                className={`grid size-5 place-items-center transition-colors duration-150 ease-mech ${active ? 'hover:text-void' : 'hover:text-ink'}`}
+              >
+                {isPinned ? <PinOff {...icon} /> : <Pin {...icon} />}
+              </button>
+            )}
             {!confirming && !thread.draft && (
               <button
                 type="button"

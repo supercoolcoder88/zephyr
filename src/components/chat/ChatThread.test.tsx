@@ -61,6 +61,7 @@ const view = (
     onPrompt={() => undefined}
     onIsolate={() => undefined}
     onMerge={() => undefined}
+    onResolve={() => undefined}
     onImages={() => undefined}
     onAnswer={() => undefined}
     composer={{ current: null }}
@@ -162,6 +163,7 @@ const renderQuote = () => {
       onPrompt={onPrompt}
       onIsolate={() => undefined}
       onMerge={() => undefined}
+      onResolve={() => undefined}
       onImages={() => undefined}
       onAnswer={() => undefined}
       composer={composer}
@@ -244,6 +246,7 @@ it('shows a prompt set from outside without remounting', () => {
     onPrompt: () => undefined,
     onIsolate: () => undefined,
     onMerge: () => undefined,
+    onResolve: () => undefined,
     onImages: () => undefined,
     onAnswer: () => undefined,
     composer: { current: null },

@@ -26,6 +26,7 @@ interface Props {
   onPrompt(text: string): void;
   onIsolate(isolated: boolean): void;
   onMerge(): void;
+  onResolve(): void;
   onImages(update: (images: Image[]) => Image[]): void;
   onAnswer(id: string, allow: boolean, answers?: Record<string, string>): void;
   composer: RefObject<HTMLTextAreaElement | null>;
@@ -40,6 +41,7 @@ export default function ChatThread({
   onPrompt,
   onIsolate,
   onMerge,
+  onResolve,
   onImages,
   onAnswer,
   composer,
@@ -217,6 +219,11 @@ export default function ChatThread({
               </div>
             ))}
             {running && !permissions.length && <Wave />}
+            {thread.conflict && !running && (
+              <Button variant="primary" size="md" onClick={onResolve}>
+                [ RESOLVE WITH AGENT ]
+              </Button>
+            )}
             {permissions.map((request) =>
               request.tool === 'AskUserQuestion' ? (
                 <Questions

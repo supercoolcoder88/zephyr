@@ -627,6 +627,53 @@ it('archives a thread by hand and unarchives it to the top, across restarts', as
   expect(sidebarTitles()).toEqual(['Older', '[ ARCHIVED 1 ]']);
 });
 
+it('pins threads to the top in pin order, safe from auto-archive, across restarts', async () => {
+  const day = 86_400_000;
+  agent.listThreads.mockResolvedValue([
+    ...withOldest,
+    { id: 'o', title: 'Old', createdAt: now - day, updatedAt: now - day },
+  ]);
+  let user = await open();
+  expect(sidebarTitles()).toEqual([
+    'Newest',
+    'Older',
+    'Oldest',
+    '[ ARCHIVED 1 ]',
+  ]);
+
+  await user.click(screen.getByRole('button', { name: '[ ARCHIVED 1 ]' }));
+  await user.click(
+    row(/Old(Pinned|proj)?$/).getByRole('button', { name: 'Unarchive' }),
+  );
+  await user.click(
+    row(/Old(Pinned|proj)?$/).getByRole('button', { name: 'Pin' }),
+  );
+  await user.click(row(/Oldest/).getByRole('button', { name: 'Pin' }));
+  expect(sidebarTitles()).toEqual(['Old', 'Oldest', 'Newest', 'Older']);
+  expect(
+    row(/Old(Pinned|proj)?$/).getByRole('img', { name: 'Pinned' }),
+  ).toBeTruthy();
+
+  cleanup();
+  user = await open();
+  expect(sidebarTitles()).toEqual(['Old', 'Oldest', 'Newest', 'Older']);
+
+  await user.click(row(/Oldest/).getByRole('button', { name: 'Unpin' }));
+  await user.click(
+    row(/Old(Pinned|proj)?$/).getByRole('button', { name: 'Archive' }),
+  );
+  expect(sidebarTitles()).toEqual([
+    'Newest',
+    'Older',
+    'Oldest',
+    '[ ARCHIVED 1 ]',
+  ]);
+  await user.click(screen.getByRole('button', { name: '[ ARCHIVED 1 ]' }));
+  expect(
+    row(/Old(Pinned|proj)?$/).queryByRole('button', { name: 'Pin' }),
+  ).toBeNull();
+});
+
 it('opens the next listed thread after deleting an unarchived one', async () => {
   agent.listThreads.mockResolvedValue(withOldest);
   const user = await open();
@@ -1884,7 +1931,7 @@ it('lists worktree sessions with the workspace, loading and deleting them in the
   expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj', tree);
 });
 
-it('merges an idle worktree thread from its branch label, keeping it when the merge fails', async () => {
+it('merges an idle worktree thread from its branch label, retrying after an agent resolves conflicts', async () => {
   const tree = '/proj/.zephyr/worktrees/x';
   agent.branch.mockImplementation(async (cwd: string) =>
     cwd === tree ? 'zephyr/x' : 'main',
@@ -1903,8 +1950,23 @@ it('merges an idle worktree thread from its branch label, keeping it when the me
   expect(await screen.findByText('CONFLICT (content)')).toBeInTheDocument();
   expect(sidebarTitles()).toEqual(['Newest', 'Older']);
 
-  await user.click(screen.getByRole('button', { name: 'Merge zephyr/x' }));
-  await user.click(screen.getByRole('button', { name: 'Confirm merge' }));
+  await user.click(
+    screen.getByRole('button', { name: '[ RESOLVE WITH AGENT ]' }),
+  );
+  expect(agent.send.mock.lastCall!.slice(1, 5)).toEqual([
+    'Merging this worktree into main hit conflicts. Merge main into this branch, resolve the conflicts keeping the intent of both sides, run the tests, and commit the merge.',
+    [],
+    tree,
+    'b',
+  ]);
+  expect(
+    screen.queryByRole('button', { name: '[ RESOLVE WITH AGENT ]' }),
+  ).toBeNull();
+  await act(async () => {
+    emit({ type: 'done', ok: true, result: '' });
+    finishRun();
+  });
+  expect(agent.mergeWorktree).toHaveBeenCalledTimes(2);
   expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj', tree);
   expect(sidebarTitles()).toEqual(['Older']);
   expect(screen.queryByRole('button', { name: /^Merge/ })).toBeNull();

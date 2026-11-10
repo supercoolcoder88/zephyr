@@ -15,6 +15,7 @@ import {
   listThreads,
   newThread,
   type ArchiveChoices,
+  type Pins,
   type Thread,
 } from './thread';
 
@@ -59,6 +60,7 @@ function merge(
         prompt: known?.prompt,
         images: known?.images,
         context: known?.context ?? saved[id],
+        conflict: known?.conflict,
       };
     }),
   ];
@@ -74,6 +76,9 @@ export default function App() {
   const [error, setError] = useState<string>();
   const [choices, setChoices] = useState<ArchiveChoices>(() =>
     JSON.parse(localStorage.getItem('archived') ?? '{}'),
+  );
+  const [pins, setPins] = useState<Pins>(() =>
+    JSON.parse(localStorage.getItem('pinned') ?? '{}'),
   );
   const [dragging, setDragging] = useState<boolean | 'new' | 'chat'>(false);
   const sidebarLayout = useDefaultLayout({
@@ -98,6 +103,8 @@ export default function App() {
       }
     >(),
   );
+  // Threads whose current run is resolving merge conflicts.
+  const resolving = useRef(new Set<string>());
   const runningThreads = () =>
     [...runs.current.values()].filter((r) => r.running).map((r) => r.id);
   const runOf = (id: string) =>
@@ -296,6 +303,7 @@ export default function App() {
   const { current, archived } = listThreads(
     visible,
     choices,
+    pins,
     activeId,
     runningIds,
   );
@@ -307,6 +315,15 @@ export default function App() {
       const { [id]: _, ...next } = prev;
       if (value !== undefined) next[id] = value;
       localStorage.setItem('archived', JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function pin(id: string, value: boolean) {
+    setPins((prev) => {
+      const { [id]: _, ...next } = prev;
+      if (value) next[id] = Date.now();
+      localStorage.setItem('pinned', JSON.stringify(next));
       return next;
     });
   }
@@ -480,6 +497,7 @@ export default function App() {
     }
     setThreads((prev) => prev.filter((t) => t.id !== id));
     choose(id, undefined);
+    pin(id, false);
     if (thread !== active) return;
     const siblings = current.filter((t) => t.cwd === thread.cwd);
     const i = siblings.indexOf(thread);
@@ -498,10 +516,35 @@ export default function App() {
         thread.title,
       );
     } catch (err) {
-      return report(thread.id)(err);
+      report(thread.id)(err);
+      if (String(err).includes('CONFLICT'))
+        patch(thread.id, (t) => ({ ...t, conflict: true }));
+      return;
     }
     await remove(thread.id);
   }
+
+  async function resolveConflict(thread: Thread) {
+    const base = await window.agent.branch(thread.cwd);
+    patch(thread.id, (t) => ({ ...t, conflict: undefined }));
+    resolving.current.add(thread.id);
+    send(
+      `Merging this worktree into ${base} hit conflicts. Merge ${base} into this branch, resolve the conflicts keeping the intent of both sides, run the tests, and commit the merge.`,
+      [],
+      JSON.parse(localStorage.getItem('model') ?? '{"model":"opus"}'),
+    );
+  }
+
+  // Retries the merge once the agent resolving its conflicts finishes cleanly.
+  useEffect(() => {
+    const thread = visible.find((t) => t.id === finishedId);
+    if (
+      thread &&
+      resolving.current.delete(thread.id) &&
+      thread.status === 'done'
+    )
+      mergeWorktree(thread);
+  }, [finishedId]);
 
   function saveProjects(update: (prev: string[]) => string[]) {
     setProjects((prev) => {
@@ -614,7 +657,12 @@ export default function App() {
             onCloseProject={closeProject}
             current={current}
             archived={archived}
-            onArchive={(id, value) => choose(id, value || Date.now())}
+            onArchive={(id, value) => {
+              choose(id, value || Date.now());
+              if (value) pin(id, false);
+            }}
+            pinned={pins}
+            onPin={pin}
             activeId={active.id}
             runningIds={runningIds}
             onSelect={(id) => select(visible.find((t) => t.id === id)!)}
@@ -700,6 +748,7 @@ export default function App() {
                   patch(active.id, (t) => ({ ...t, prompt }))
                 }
                 onMerge={() => mergeWorktree(active)}
+                onResolve={() => resolveConflict(active)}
                 onIsolate={(isolated) =>
                   patch(active.id, (t) => ({
                     ...t,

@@ -54,6 +54,8 @@ export interface Thread {
   // The thread's git worktree folder and branch, when it runs in one.
   worktree?: string;
   branch?: string;
+  // The last merge into the workspace's branch hit conflicts.
+  conflict?: true;
 }
 
 export function threadState(thread: Thread, runningIds: string[]): ThreadState {
@@ -80,18 +82,23 @@ export function newThread(cwd: string): Thread {
 // Manual archive choices by session id; true archives, a timestamp unarchives and lists it from then.
 export type ArchiveChoices = Record<string, true | number>;
 
+// Pin times by session id; pinned threads list first in pin order.
+export type Pins = Record<string, number>;
+
 // Read threads untouched since before today are archived unless chosen by hand;
-// unmerged ones only by hand.
+// unmerged ones only by hand, pinned ones never.
 export function listThreads(
   threads: Thread[],
   choices: ArchiveChoices,
+  pins: Pins,
   activeId: string | undefined,
   runningIds: string[],
 ) {
   const today = new Date().setHours(0, 0, 0, 0);
   const archived = threads.filter((t) => {
     const state = threadState(t, runningIds);
-    if (t.draft || (state !== 'read' && state !== 'unmerged')) return false;
+    if (t.draft || t.id in pins || (state !== 'read' && state !== 'unmerged'))
+      return false;
     return t.id in choices
       ? choices[t.id] === true
       : state === 'read' && t.updatedAt < today && t.id !== activeId;
@@ -100,6 +107,10 @@ export function listThreads(
     Math.max(t.createdAt, Number(choices[t.id] ?? 0));
   const current = threads
     .filter((t) => !archived.includes(t))
-    .toSorted((a, b) => listedAt(b) - listedAt(a));
+    .toSorted(
+      (a, b) =>
+        (pins[a.id] ?? Infinity) - (pins[b.id] ?? Infinity) ||
+        listedAt(b) - listedAt(a),
+    );
   return { current, archived };
 }
