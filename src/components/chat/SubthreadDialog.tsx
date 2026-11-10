@@ -53,7 +53,7 @@ export default function SubthreadDialog({ subthread, onClose }: Props) {
             [ CLOSE ]
           </Button>
         </header>
-        <div className="min-h-0 space-y-2 overflow-y-auto px-6 py-6">
+        <div className="min-h-0 space-y-2 overflow-y-auto px-6 py-6 select-text">
           {subthread.items.length === 0 ? (
             <p className="text-center text-2xs tracking-widest text-mute">
               NO OUTPUT YET

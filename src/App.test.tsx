@@ -177,7 +177,9 @@ const heading = () => screen.getByRole('heading', { level: 1 }).textContent;
 async function open() {
   const user = userEvent.setup();
   render(<App />);
-  await user.click(screen.getByRole('button', { name: '[ OPEN FOLDER ]' }));
+  await user.click(
+    await screen.findByRole('button', { name: '[ OPEN FOLDER ]' }),
+  );
   await screen.findByRole('navigation');
   return user;
 }
@@ -186,6 +188,7 @@ async function restart() {
   cleanup();
   const user = userEvent.setup();
   render(<App />);
+  expect(screen.queryByRole('button', { name: '[ OPEN FOLDER ]' })).toBeNull();
   await screen.findByRole('navigation');
   return user;
 }
@@ -326,7 +329,7 @@ it('shows a load failure in the chat', async () => {
 it('attaches pasted images, keeps them with a draft and sends them', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await open();
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.keyboard('{Control>}n{/Control}');
   const paste = (file = new File(['png'], 'shot.png', { type: 'image/png' })) =>
     fireEvent.paste(screen.getByPlaceholderText('Ask the agent…'), {
       clipboardData: { files: [file] },
@@ -371,7 +374,7 @@ it('swaps a draft to its session id and refreshes the list after the run', async
   agent.listThreads.mockResolvedValueOnce(list);
   agent.loadThread.mockResolvedValue([{ type: 'text', text: 'old answer' }]);
   const user = await open();
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.keyboard('{Control>}n{/Control}');
   expect(heading()).toBe('New thread');
   await sendPrompt(user, 'first prompt');
   const runId = lastRunId();
@@ -430,16 +433,16 @@ it('keeps drafts with text at the top and drops untouched ones', async () => {
   const composer = () => screen.getByPlaceholderText('Ask the agent…');
   await user.click(screen.getByRole('button', { name: /Older/ }));
   await sendPrompt(user, 'go');
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.keyboard('{Control>}n{/Control}');
   expect(composer()).toHaveFocus();
   expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.keyboard('{Control>}n{/Control}');
   expect(composer()).toHaveFocus();
   expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
   await user.click(screen.getByRole('button', { name: /Newest/ }));
   expect(sidebarTitles()).toEqual(['Newest', 'Older']);
 
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.keyboard('{Control>}n{/Control}');
   await user.type(composer(), 'half typed');
   await user.click(screen.getByRole('button', { name: /Newest/ }));
   expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older']);
@@ -655,7 +658,7 @@ it('pins threads to the top in pin order, safe from auto-archive, across restart
   ).toBeTruthy();
 
   cleanup();
-  user = await open();
+  user = await restart();
   expect(sidebarTitles()).toEqual(['Old', 'Oldest', 'Newest', 'Older']);
 
   await user.click(row(/Oldest/).getByRole('button', { name: 'Unpin' }));
@@ -1207,7 +1210,7 @@ it('keeps one archive for every project, naming the project under each title', a
   const user = await open();
   await openAnother(user, '/other');
   await screen.findByRole('button', { name: 'other' });
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.keyboard('{Control>}n{/Control}');
   await user.click(screen.getByRole('button', { name: '[ ARCHIVED 2 ]' }));
   expect(sidebarTitles()).toEqual([
     'New thread',
@@ -1274,7 +1277,7 @@ it('defaults to auto mode and switches mode from settings', async () => {
   expect(agent.send.mock.lastCall![6]).toBe('plan');
 
   cleanup();
-  const again = await open();
+  const again = await restart();
   await sendPrompt(again, 'later');
   expect(agent.send.mock.lastCall![6]).toBe('plan');
 });
@@ -1497,7 +1500,7 @@ it('shows the last usage seen when none was fetched this run', async () => {
     'usage',
     JSON.stringify([{ label: 'Week', utilization: 61, resetsAt: null }]),
   );
-  user = await open();
+  user = await restart();
   await showUsage();
   expect(await screen.findByText('61%')).toBeInTheDocument();
 });
@@ -1674,7 +1677,7 @@ it('toggles the backlog panel from its icon, the separator lines and Ctrl+T', as
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Electron/40.0.0',
     );
   onTestFinished(() => ua.mockRestore());
-  await open();
+  await restart();
   expect(screen.getByRole('button', { name: 'Hide backlog' })).toHaveAttribute(
     'title',
     'Toggle backlog (⌘T)',
@@ -1884,7 +1887,7 @@ it('runs a thread on the current branch, or in a new worktree picked before its 
   expect(screen.getByText('main')).toBeInTheDocument();
   await finish();
 
-  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.keyboard('{Control>}n{/Control}');
   await user.click(await screen.findByRole('button', { name: 'main' }));
   await user.click(screen.getByRole('menuitemradio', { name: 'New worktree' }));
   expect(screen.queryByRole('menu')).toBeNull();

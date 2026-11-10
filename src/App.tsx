@@ -74,6 +74,7 @@ export default function App() {
   const [runningIds, setRunningIds] = useState<string[]>([]);
   const [finishedId, setFinishedId] = useState<string>();
   const [error, setError] = useState<string>();
+  const [booted, setBooted] = useState(false);
   const [choices, setChoices] = useState<ArchiveChoices>(() =>
     JSON.parse(localStorage.getItem('archived') ?? '{}'),
   );
@@ -610,8 +611,12 @@ export default function App() {
     Promise.all(dirs.map((cwd) => load(cwd).catch(() => []))).then((loaded) => {
       const first = loaded[launched ? dirs.indexOf(launched) : 0]?.[0];
       if (first) select(first);
+      setBooted(true);
     });
   }, []);
+
+  // Blank until saved projects load, so the open folder screen doesn't flash.
+  if (!active && !booted) return <main className="h-screen bg-void" />;
 
   if (!active) {
     return (

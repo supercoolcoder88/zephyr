@@ -181,7 +181,7 @@ export default function Sidebar({
             className={`absolute inset-y-0 right-0 flex items-center gap-1 bg-inherit pr-4 pl-3 transition-opacity duration-150 ease-mech ${
               confirming
                 ? 'text-alert'
-                : `opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 ${active ? 'text-void/50' : 'text-mute'}`
+                : `opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100 ${active ? 'text-void/50' : 'text-mute'}`
             }`}
           >
             {!confirming && !thread.draft && !isArchived && (
@@ -229,7 +229,6 @@ export default function Sidebar({
             <span className="text-2xs tracking-widest text-mute">DEV</span>
           )}
         </span>
-        <Button onClick={() => onNew()}>[ + NEW ]</Button>
       </header>
       <nav className="flex-1 overflow-y-auto py-2">
         {projects.map((cwd) => {

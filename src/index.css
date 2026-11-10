@@ -112,6 +112,11 @@
     background: var(--color-void);
     color: var(--color-ink);
     font-family: var(--font-mono);
+    user-select: none;
+  }
+
+  button {
+    user-select: none;
   }
 
   :focus-visible {

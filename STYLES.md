@@ -49,7 +49,8 @@ Blocky, futuristic, black and white. Monochrome carries the whole interface. Neo
 
 - **Border radius is 0.** `--radius-*` is reset in the theme, so `rounded-*` does nothing. Don't work around it. The one exception is the orange update dot, which is `rounded-full`.
 - Depth comes from 1px borders and inversion. No drop shadows except the cyan glow.
-- Bracket small controls and indices: `[ SEND ]`, `[ + NEW ]`, `01`.
+- Bracket small controls and indices: `[ SEND ]`, `[ + PROJECT ]`, `01`.
+- Text is unselectable app-wide (`user-select: none` on `body`). Add `select-text` only to content worth copying: the chat transcript, subthread transcript and backlog entries. Inputs stay selectable; buttons never are.
 - Dense spacing on a 4px base. This is a tool, not a landing page.
 - A chamfered corner (`.chamfer`) is allowed on at most one primary element per view.
 - Icons come from `lucide-react` at 14px with a 1.5 stroke, `strokeLinecap="square"` and `strokeLinejoin="miter"`. Use one only where a glyph reads better than a bracketed label (panel toggle, drag grip).

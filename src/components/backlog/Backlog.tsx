@@ -274,15 +274,17 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
                     {entry.done ? '[x]' : '[ ]'}
                   </button>
                   {renaming === key ? (
-                    <input
+                    <textarea
                       aria-label={`Rename ${entry.text}`}
                       defaultValue={entry.text}
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === 'Escape')
                           e.currentTarget.value = entry.text;
-                        if (e.key === 'Enter' || e.key === 'Escape')
+                        if (e.key === 'Enter' || e.key === 'Escape') {
+                          e.preventDefault();
                           e.currentTarget.blur();
+                        }
                       }}
                       onBlur={(e) => {
                         setRenaming(undefined);
@@ -290,12 +292,12 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
                         if (text.trim() && text !== entry.text)
                           edit({ type: 'rename', entry, text });
                       }}
-                      className="min-w-0 flex-1 bg-transparent outline-none"
+                      className="field-sizing-content min-w-0 flex-1 resize-none bg-transparent outline-none"
                     />
                   ) : (
                     <span
                       onDoubleClick={() => setRenaming(key)}
-                      className="min-w-0 flex-1 cursor-text break-words peer-aria-checked:text-mute peer-aria-checked:line-through"
+                      className="min-w-0 flex-1 cursor-text break-words select-text peer-aria-checked:text-mute peer-aria-checked:line-through"
                     >
                       {entry.text}
                     </span>

@@ -135,7 +135,7 @@ export default function ChatThread({
             </p>
           </div>
         ) : (
-          <div className="mx-auto max-w-4xl space-y-6">
+          <div className="mx-auto max-w-4xl space-y-6 select-text">
             {turns.map((turn, t) => {
               const last = t === turns.length - 1;
               const collapsed = !(running && last);
