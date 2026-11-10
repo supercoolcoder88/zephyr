@@ -139,11 +139,11 @@ export default function Sidebar({
           type="button"
           aria-current={active ? 'page' : undefined}
           onClick={() => onSelect(thread.id)}
-          className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2 text-left text-sm"
+          className="flex min-w-0 flex-1 items-center gap-2 px-4 py-2 text-left text-sm"
         >
           <span
             aria-label={threadState(thread, runningIds)}
-            className={`size-1.5 shrink-0 ${stateDot[threadState(thread, runningIds)]}`}
+            className={`mx-1 size-1.5 shrink-0 ${stateDot[threadState(thread, runningIds)]}`}
           />
           <span className="min-w-0 flex-1">
             <span className="block truncate">{thread.title}</span>

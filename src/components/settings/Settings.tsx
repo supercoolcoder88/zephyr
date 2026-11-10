@@ -83,7 +83,7 @@ function Segmented({
           role="radio"
           aria-checked={value === o}
           onClick={() => onPick(o)}
-          className="border border-line px-3 py-1 text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech not-first:-ml-px not-aria-checked:text-mute not-aria-checked:hover:text-ink aria-checked:border-paper aria-checked:bg-paper aria-checked:text-void"
+          className="h-6 border border-line px-3 text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech not-first:-ml-px not-aria-checked:text-mute not-aria-checked:hover:text-ink aria-checked:border-paper aria-checked:bg-paper aria-checked:text-void"
         >
           {o}
         </button>
@@ -212,7 +212,7 @@ export default function Settings({
                     aria-label={label}
                     aria-checked={permission === value}
                     onClick={() => onPermission(value)}
-                    className="flex w-full items-center gap-3 border-b border-line py-3 text-left transition-colors duration-150 ease-mech not-aria-checked:text-mute not-aria-checked:hover:text-ink"
+                    className="flex w-full items-start gap-3 border-b border-line py-3 text-left transition-colors duration-150 ease-mech not-aria-checked:text-mute not-aria-checked:hover:text-ink"
                   >
                     <span aria-hidden className="w-2 text-sm">
                       {permission === value && '>'}

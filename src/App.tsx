@@ -622,7 +622,9 @@ export default function App() {
     return (
       <main className="flex h-screen flex-col items-center justify-center gap-8 bg-void text-ink">
         <div className="flex flex-col items-center gap-2">
-          <h1 className="text-5xl font-medium tracking-[0.3em]">ZEPHYR</h1>
+          <h1 className="indent-[0.3em] text-5xl font-medium tracking-[0.3em]">
+            ZEPHYR
+          </h1>
           {import.meta.env.DEV && (
             <span className="text-2xs tracking-widest text-mute">DEV</span>
           )}

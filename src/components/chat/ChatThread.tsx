@@ -140,7 +140,9 @@ export default function ChatThread({
       >
         {turns.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2">
-            <p className="text-5xl font-medium tracking-widest">READY</p>
+            <p className="indent-[0.1em] text-5xl font-medium tracking-widest">
+              READY
+            </p>
             <p className="text-2xs tracking-widest text-mute">
               NO MESSAGES YET
             </p>
