@@ -2040,8 +2040,7 @@ it("suggests the workspace's lockfile install as worktree setup and saves an ove
   expect(JSON.parse(localStorage.getItem('setup')!)).toEqual({});
 });
 
-it('opens the workspace terminal from the backlog or Ctrl+`, keeping its display and shell alive', async () => {
-  const user = await open();
+it('opens the workspace terminal from the backlog or Ctrl+`, keeping its shell alive and replaying it on reopen', async () => {
   const dialog = () => screen.queryByRole('dialog', { name: 'Terminal' });
   let shellOutput: (cwd: string, data: string) => void = () => undefined;
   let shellExit: (cwd: string) => void = () => undefined;
@@ -2053,6 +2052,7 @@ it('opens the workspace terminal from the backlog or Ctrl+`, keeping its display
     shellExit = fn;
     return () => undefined;
   });
+  const user = await open();
 
   await user.click(screen.getByRole('button', { name: '[ TERMINAL ]' }));
   expect(dialog()).toBeInTheDocument();
@@ -2072,11 +2072,13 @@ it('opens the workspace terminal from the backlog or Ctrl+`, keeping its display
 
   await user.keyboard('{Control>}[Backquote]{/Control}');
   expect(dialog()).toBeNull();
-  shellOutput('/proj', 'while hidden\r\n');
+  terminal.open.mockResolvedValueOnce('/proj\r\nwhile hidden\r\n');
   await user.keyboard('{Control>}[Backquote]{/Control}');
   expect(dialog()).toBeInTheDocument();
-  expect(terminal.open).toHaveBeenCalledTimes(1);
-  expect(screenText).toEqual(['/proj\r\n', 'while hidden\r\n']);
+  await vi.waitFor(() =>
+    expect(screenText).toEqual(['/proj\r\n', '/proj\r\nwhile hidden\r\n']),
+  );
+  expect(terminal.open).toHaveBeenCalledTimes(2);
   await user.click(screen.getByRole('button', { name: '[ CLOSE ]' }));
   expect(dialog()).toBeNull();
 
@@ -2084,7 +2086,15 @@ it('opens the workspace terminal from the backlog or Ctrl+`, keeping its display
   act(() => shellExit('/proj'));
   expect(dialog()).toBeNull();
   await user.keyboard('{Control>}[Backquote]{/Control}');
-  await vi.waitFor(() => expect(terminal.open).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(terminal.open).toHaveBeenCalledTimes(4));
+
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  await user.click(screen.getByRole('button', { name: 'Kill terminal' }));
+  expect(terminal.close).toHaveBeenCalledWith('/proj');
+  act(() => shellExit('/proj'));
+  expect(
+    screen.queryByRole('button', { name: 'Kill terminal' }),
+  ).not.toBeInTheDocument();
 });
 
 it('rebuilds the terminal on a theme change, drops it on a workspace switch and kills the shell when its project closes', async () => {
@@ -2103,10 +2113,10 @@ it('rebuilds the terminal on a theme change, drops it on a workspace switch and 
 
   await user.keyboard('{Control>}[Backquote]{/Control}');
   await vi.waitFor(() => expect(opened('/proj')).toBe(1));
-  await user.keyboard('{Control>}[Backquote]{/Control}');
   document.documentElement.dataset.theme =
     theme === 'cyber' ? 'light' : 'cyber';
   await vi.waitFor(() => expect(opened('/proj')).toBe(2));
+  await user.keyboard('{Control>}[Backquote]{/Control}');
 
   await user.click(screen.getByRole('button', { name: /Other/ }));
   await user.keyboard('{Control>}[Backquote]{/Control}');

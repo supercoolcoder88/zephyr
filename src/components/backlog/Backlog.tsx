@@ -52,9 +52,9 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
   const [renaming, setRenaming] = useState<string>();
   const [showDone, setShowDone] = useState(false);
   const [terminal, setTerminal] = useState(false);
-  // Only the active workspace keeps a display; others replay from their shell when revisited.
-  const [display, setDisplay] = useState<string>();
-  if (terminal && display !== cwd) setDisplay(cwd);
+  // The workspace whose shell this window started, so it can offer to kill it.
+  const [shell, setShell] = useState<string>();
+  if (terminal && shell !== cwd) setShell(cwd);
   const [dragKey, setDragKey] = useState<string>();
   const [over, setOver] = useState<{ key: string; side: 'before' | 'after' }>();
   const press = useRef({ x: 0, y: 0 });
@@ -118,6 +118,16 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
       window.removeEventListener('keydown', onTerminalKey, true);
     };
   }, []);
+
+  useEffect(
+    () =>
+      window.terminal.onExit((from) => {
+        if (from !== cwd) return;
+        setTerminal(false);
+        setShell(undefined);
+      }),
+    [cwd],
+  );
 
   useEffect(() => () => clearTimeout(snap.current), []);
 
@@ -332,24 +342,35 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
             {rows.length === pending.length && doneToggle}
           </ul>
           {error && <p className="px-4 py-2 text-2xs text-alert">{error}</p>}
-          <Button
-            size="lg"
-            aria-expanded={terminal}
-            title="Toggle terminal (Ctrl+`)"
-            onClick={() => setTerminal(true)}
-            className="w-full shrink-0 border-t border-line hover:bg-line"
-          >
-            [ TERMINAL ]
-          </Button>
+          <div className="flex shrink-0 border-t border-line">
+            <Button
+              size="lg"
+              aria-expanded={terminal}
+              title="Toggle terminal (Ctrl+`)"
+              onClick={() => setTerminal(true)}
+              className="flex-1 hover:bg-line"
+            >
+              [ TERMINAL ]
+            </Button>
+            {shell === cwd && (
+              <Button
+                size="lg"
+                variant="destructive"
+                aria-label="Kill terminal"
+                title="Kill terminal"
+                onClick={() => window.terminal.close(cwd)}
+              >
+                [ X ]
+              </Button>
+            )}
+          </div>
         </section>
       </Panel>
-      {display === cwd && (
+      {terminal && (
         <TerminalDialog
           key={cwd}
           cwd={cwd}
-          open={terminal}
           onClose={() => setTerminal(false)}
-          onExit={() => setDisplay(undefined)}
         />
       )}
     </Group>

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { FitAddon, init, Terminal } from 'ghostty-web';
 import Button from '../ui/Button';
 
@@ -15,33 +15,24 @@ const watchTheme = (onChange: () => void) => {
 
 interface Props {
   cwd: string;
-  open: boolean;
   onClose(): void;
-  onExit(): void;
 }
 
-// Stays mounted while hidden on its workspace so the display keeps its screen and scrollback.
-export default function TerminalDialog({ cwd, open, onClose, onExit }: Props) {
+// Unmounted when closed, as ghostty-web redraws every frame; reopening replays the shell's saved output.
+export default function TerminalDialog({ cwd, onClose }: Props) {
   const screen = useRef<HTMLDivElement>(null);
-  const term = useRef<Terminal>(undefined);
   // ghostty-web can't restyle a live display, so a theme change rebuilds it from the shell's saved output.
   const theme = useSyncExternalStore(
     watchTheme,
     () => document.documentElement.dataset.theme,
   );
-  const exit = useEffectEvent(() => {
-    if (open) onClose();
-    onExit();
-  });
 
   useEffect(() => {
-    if (!open) return;
     const previous = document.activeElement;
-    term.current?.focus();
     return () => {
       if (previous instanceof HTMLElement) previous.focus();
     };
-  }, [open]);
+  }, []);
 
   useEffect(() => {
     const cleanup: (() => void)[] = [];
@@ -80,7 +71,6 @@ export default function TerminalDialog({ cwd, open, onClose, onExit }: Props) {
       if (closed) return;
       // Empty for a new shell, and ghostty-web throws on an empty write.
       if (output) t.write(output);
-      term.current = t;
       if (!screen.current.closest('[inert]')) t.focus();
       const input = t.onData((data) => window.terminal.write(cwd, data));
       const resize = t.onResize(({ cols, rows }) =>
@@ -90,7 +80,6 @@ export default function TerminalDialog({ cwd, open, onClose, onExit }: Props) {
         () => input.dispose(),
         () => resize.dispose(),
         window.terminal.onData((from, data) => from === cwd && t.write(data)),
-        window.terminal.onExit((from) => from === cwd && exit()),
       );
     });
     return () => {
@@ -101,16 +90,14 @@ export default function TerminalDialog({ cwd, open, onClose, onExit }: Props) {
 
   return (
     <div
-      aria-hidden={!open}
-      inert={!open}
       onPointerDown={(e) => e.target === e.currentTarget && onClose()}
       // App shortcuts stay out of the shell's way; Ctrl+` is caught before this.
       onKeyDown={(e) => e.stopPropagation()}
-      className="fixed inset-0 z-20 flex items-center justify-center bg-void/80 p-12 aria-hidden:invisible"
+      className="fixed inset-0 z-20 flex items-center justify-center bg-void/80 p-12"
     >
       <div
         role="dialog"
-        aria-modal={open || undefined}
+        aria-modal
         aria-label="Terminal"
         className="flex h-full w-full max-w-5xl flex-col border border-line-strong bg-void"
       >
