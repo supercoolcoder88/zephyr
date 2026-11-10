@@ -2,7 +2,7 @@ import { app, ipcMain, webContents } from 'electron';
 import { spawn, type IPty } from 'node-pty';
 
 const limit = 256 * 1024;
-// One shell per workspace, kept alive with its recent output so a reopened popup can replay it.
+// One shell per workspace, kept with its recent output so a reloaded window can replay it.
 const shells = new Map<string, { pty: IPty; output: string }>();
 
 export function registerTerminalIpc() {
@@ -26,11 +26,7 @@ export function registerTerminalIpc() {
           cols,
           rows,
           name: 'xterm-256color',
-          env: {
-            ...process.env,
-            TERM: 'xterm-256color',
-            COLORTERM: 'truecolor',
-          },
+          env: { ...process.env, COLORTERM: 'truecolor' },
         },
       );
       const shell = { pty, output: '' };
