@@ -69,10 +69,12 @@ export default function ModelPicker({ models, choice, onChoose }: Props) {
           setHovered(choice.model);
           setPicking(!picking);
         }}
-        className="max-w-full truncate"
+        className="max-w-full"
       >
-        {current?.displayName ?? choice.model}
-        {effort && ` · ${effort}`}
+        <span className="truncate">
+          {current?.displayName ?? choice.model}
+          {effort && ` · ${effort}`}
+        </span>
       </Button>
       {picking && (
         <ul

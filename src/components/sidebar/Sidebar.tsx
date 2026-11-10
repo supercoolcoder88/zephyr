@@ -282,7 +282,7 @@ export default function Sidebar({
               size="md"
               aria-expanded={showArchived}
               onClick={() => setShowArchived(!showArchived)}
-              className="mt-2 flex w-full items-center px-4 hover:bg-line"
+              className="mt-2 w-full hover:bg-line"
             >
               {showArchived
                 ? '[ HIDE ARCHIVED ]'

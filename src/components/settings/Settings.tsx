@@ -83,7 +83,7 @@ function Segmented({
           role="radio"
           aria-checked={value === o}
           onClick={() => onPick(o)}
-          className="h-6 border border-line px-3 text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech not-first:-ml-px not-aria-checked:text-mute not-aria-checked:hover:text-ink aria-checked:border-paper aria-checked:bg-paper aria-checked:text-void"
+          className="h-8 border border-line px-3 text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech not-first:-ml-px not-aria-checked:text-mute not-aria-checked:hover:text-ink aria-checked:border-paper aria-checked:bg-paper aria-checked:text-void"
         >
           {o}
         </button>
@@ -178,7 +178,7 @@ export default function Settings({
             ))}
         </nav>
         <section className="flex min-w-0 flex-1 flex-col">
-          <header className="flex shrink-0 items-start justify-between border-b border-line px-6 py-6">
+          <header className="flex shrink-0 items-center justify-between border-b border-line px-6 py-6">
             <h2 className="text-5xl font-medium tracking-widest uppercase">
               {section}
             </h2>
@@ -240,7 +240,7 @@ export default function Settings({
                     localStorage.setItem('setup', JSON.stringify(next));
                     setSetups(next);
                   }}
-                  className="w-64 border border-line bg-transparent px-3 py-1 text-sm outline-none placeholder:text-mute focus:border-line-strong"
+                  className="h-8 w-64 border border-line bg-transparent px-3 text-sm outline-none placeholder:text-mute focus:border-line-strong"
                 />
               </Row>
             )}
@@ -328,7 +328,7 @@ export default function Settings({
                 </Row>
                 {hotkeys.map(([action, keys]) => (
                   <Row key={action} name={action}>
-                    <kbd className="border border-line px-2 py-0.5 text-2xs tracking-widest text-mute uppercase">
+                    <kbd className="flex h-6 items-center border border-line px-2 text-2xs tracking-widest text-mute uppercase">
                       {keys}
                     </kbd>
                   </Row>

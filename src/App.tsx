@@ -633,7 +633,7 @@ export default function App() {
           variant="primary"
           size="lg"
           onClick={openProject}
-          className="chamfer px-6"
+          className="chamfer"
         >
           [ OPEN FOLDER ]
         </Button>

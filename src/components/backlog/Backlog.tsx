@@ -73,7 +73,7 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
         size="md"
         aria-expanded={showDone}
         onClick={() => setShowDone(!showDone)}
-        className="mt-2 flex w-full items-center px-4 hover:bg-line"
+        className="mt-2 w-full hover:bg-line"
       >
         {showDone ? '[ HIDE DONE ]' : `[ DONE ${done.length} ]`}
       </Button>
@@ -157,7 +157,7 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
           if (e.detail && Math.hypot(e.clientX - x, e.clientY - y) > 4) return;
           toggle();
         }}
-        className="group flex w-6 cursor-pointer flex-col items-center"
+        className="group relative flex w-6 cursor-pointer flex-col items-center before:absolute before:inset-x-0 before:top-0 before:h-12 before:border-b before:border-line"
       >
         <span className="w-px flex-1 bg-line transition-colors duration-150 ease-mech group-hover:bg-line-strong group-data-[separator=active]:bg-line-strong" />
         <button
@@ -261,7 +261,7 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
                 >
                   <GripVertical
                     {...icon}
-                    className="invisible absolute top-1.5 left-0.5 text-mute group-hover:visible"
+                    className="invisible absolute top-1.75 left-0.5 text-mute group-hover:visible"
                   />
                   <button
                     type="button"
@@ -306,7 +306,7 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
                     variant="destructive"
                     aria-label={`Delete ${entry.text}`}
                     onClick={() => edit({ type: 'remove', entry })}
-                    className="invisible shrink-0 self-center group-focus-within:visible group-hover:visible"
+                    className="invisible shrink-0 leading-5 group-focus-within:visible group-hover:visible"
                   >
                     [ X ]
                   </Button>

@@ -117,7 +117,7 @@ export default function ChatThread({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-line px-6">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-line px-4">
         <h1 className="truncate text-2xs tracking-widest uppercase">
           {thread.title}
         </h1>
@@ -136,7 +136,7 @@ export default function ChatThread({
           pinned.current =
             el.scrollHeight - el.scrollTop - el.clientHeight < 48;
         }}
-        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6"
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-6"
       >
         {turns.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2">
@@ -287,6 +287,7 @@ export default function ChatThread({
       {quote && (
         <Button
           variant="primary"
+          size="icon"
           aria-label="Copy to chat"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => quoteToChat(quote.text)}
@@ -297,7 +298,7 @@ export default function ChatThread({
               window.innerWidth - quoteWidth - 4,
             ),
           }}
-          className="fixed z-10 grid size-6 place-items-center"
+          className="fixed z-10"
         >
           <MessageSquare
             size={14}

@@ -11,8 +11,9 @@ const variants = {
 
 const sizes = {
   inline: '',
+  icon: 'size-6 justify-center',
   sm: 'h-6 px-3',
-  md: 'h-8 px-3',
+  md: 'h-8 px-4',
   lg: 'h-10 px-4',
 };
 
@@ -31,7 +32,7 @@ export default function Button({
   return (
     <button
       type={type}
-      className={`text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex items-center gap-2 text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
     />
   );

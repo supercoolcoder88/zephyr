@@ -69,7 +69,7 @@ Follows the shadcn/ui approach without the library: the app owns a small set of 
 
 ### Primitives
 
-- **Button** (`ui/Button.tsx`) for every bracketed control. Variants: `ghost` (default, mute → ink, ink while `aria-expanded`), `primary` (inverted paper block), `destructive` (mute → alert), `outline-destructive` (alert outline, fills on hover). Sizes: `inline` (default, no box), `sm` h-6, `md` h-8, `lg` h-10, which matches a one-line input.
+- **Button** (`ui/Button.tsx`) for every bracketed control. Variants: `ghost` (default, mute → ink, ink while `aria-expanded`), `primary` (inverted paper block), `destructive` (mute → alert), `outline-destructive` (alert outline, fills on hover). Sizes: `inline` (default, no box), `icon` size-6, `sm` h-6, `md` h-8, `lg` h-10, which matches a one-line input; `md` and `lg` use the `px-4` panel gutter. Content is centred with `gap-2`, so callers never add flex classes.
 - **MenuItem** (`ui/MenuItem.tsx`) for menu rows: a `menuitemradio` with the `>` checked marker. Focus follows the pointer and the row inverts from `focus:` only, so exactly one row is highlighted.
 - **useDismiss** (`ui/useDismiss.ts`): `useDismiss(ref, open, onClose)`.
 - **Popover surface** (menus, listboxes, usage): `bg-panel`, `border-line` hairline, `py-1`; drop the edge that sits on an existing hairline (`border-b-0` above the composer or footer, only `border-t` when spanning the full width). Items are `px-3 py-1 text-sm`, highlighted by inversion (`bg-paper text-void`), checked `text-ink`, the rest `text-mute`.
