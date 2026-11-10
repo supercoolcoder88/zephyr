@@ -270,7 +270,7 @@ export default function Composer({
           ref={menu}
           id={listId}
           role="listbox"
-          className="absolute inset-x-0 bottom-full max-h-64 group-data-expanded/composer:top-0 group-data-expanded/composer:bottom-auto overflow-y-auto border-t border-line bg-panel py-1"
+          className="absolute inset-x-0 bottom-full max-h-64 group-data-expanded/composer:static overflow-y-auto border-t border-line bg-panel py-1"
         >
           {matches.length
             ? matches.map((c, i) => (

@@ -30,7 +30,7 @@ export default function ModelPicker({ models, choice, onChoose }: Props) {
   return (
     <div
       ref={root}
-      className="shrink-0"
+      className="min-w-0"
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget)) setPicking(false);
       }}
@@ -69,6 +69,7 @@ export default function ModelPicker({ models, choice, onChoose }: Props) {
           setHovered(choice.model);
           setPicking(!picking);
         }}
+        className="max-w-full truncate"
       >
         {current?.displayName ?? choice.model}
         {effort && ` · ${effort}`}

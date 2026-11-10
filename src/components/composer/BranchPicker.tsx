@@ -42,7 +42,7 @@ export default function BranchPicker({
           if (confirming) onMerge();
           setConfirming(!confirming);
         }}
-        className="group min-w-0 truncate"
+        className="group max-w-32 shrink-0 truncate"
       >
         <span className="group-hover:hidden group-focus-visible:hidden">
           {branch}
@@ -54,7 +54,7 @@ export default function BranchPicker({
     );
   if (locked)
     return (
-      <span className="truncate px-3 text-2xs tracking-widest text-mute uppercase">
+      <span className="max-w-32 shrink-0 truncate px-3 text-2xs tracking-widest text-mute uppercase">
         {branch}
       </span>
     );
@@ -68,7 +68,7 @@ export default function BranchPicker({
   return (
     <div
       ref={root}
-      className="min-w-0"
+      className="shrink-0"
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
       }}
@@ -95,7 +95,7 @@ export default function BranchPicker({
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         title={branch}
-        className="max-w-full truncate"
+        className="max-w-32 truncate"
       >
         {isolated ? 'New worktree' : branch}
       </Button>
