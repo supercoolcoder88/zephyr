@@ -15,6 +15,8 @@ const externalPackages = (platform: string, arch: string) => [
   '@anthropic-ai/claude-agent-sdk',
   `@anthropic-ai/claude-agent-sdk-${platform}-${arch}`,
   'node-pty',
+  // node-pty's build-time headers, hoisted out of its own node_modules.
+  'node-addon-api',
 ];
 
 const config: ForgeConfig = {
