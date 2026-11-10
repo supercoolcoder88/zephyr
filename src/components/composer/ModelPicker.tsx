@@ -30,6 +30,7 @@ export default function ModelPicker({ models, choice, onChoose }: Props) {
   return (
     <div
       ref={root}
+      className="shrink-0"
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget)) setPicking(false);
       }}
@@ -61,20 +62,16 @@ export default function ModelPicker({ models, choice, onChoose }: Props) {
     >
       <Button
         ref={trigger}
-        size="lg"
+        size="sm"
         aria-haspopup="menu"
         aria-expanded={picking}
         onClick={() => {
           setHovered(choice.model);
           setPicking(!picking);
         }}
-        className="flex items-center gap-2"
       >
-        <span>
-          {current?.displayName ?? choice.model}
-          {effort && ` · ${effort}`}
-        </span>
-        <span aria-hidden>{picking ? '▲' : '▼'}</span>
+        {current?.displayName ?? choice.model}
+        {effort && ` · ${effort}`}
       </Button>
       {picking && (
         <ul

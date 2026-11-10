@@ -260,6 +260,17 @@ it('shows a prompt set from outside without remounting', () => {
   expect(box).toHaveValue('');
 });
 
+it('expands the composer for long prompts and collapses it once sent', async () => {
+  const user = userEvent.setup();
+  render(view([]));
+  const toggle = screen.getByRole('button', { name: 'Expand composer' });
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByRole('combobox')).toHaveFocus();
+  await user.keyboard('a long prompt{Enter}');
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+});
+
 it('hides the copy button when the selection clears or the transcript scrolls', () => {
   renderQuote();
   const line = screen.getByText('first line');

@@ -34,7 +34,7 @@ export default function BranchPicker({
   if (locked && onMerge)
     return (
       <Button
-        size="lg"
+        size="sm"
         aria-label={confirming ? 'Confirm merge' : `Merge ${branch}`}
         onMouseLeave={() => setConfirming(false)}
         onBlur={() => setConfirming(false)}
@@ -42,7 +42,7 @@ export default function BranchPicker({
           if (confirming) onMerge();
           setConfirming(!confirming);
         }}
-        className="group"
+        className="group min-w-0 truncate"
       >
         <span className="group-hover:hidden group-focus-visible:hidden">
           {branch}
@@ -54,7 +54,7 @@ export default function BranchPicker({
     );
   if (locked)
     return (
-      <span className="flex h-10 items-center px-4 text-2xs tracking-widest text-mute uppercase">
+      <span className="truncate px-3 text-2xs tracking-widest text-mute uppercase">
         {branch}
       </span>
     );
@@ -68,6 +68,7 @@ export default function BranchPicker({
   return (
     <div
       ref={root}
+      className="min-w-0"
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
       }}
@@ -89,14 +90,13 @@ export default function BranchPicker({
     >
       <Button
         ref={trigger}
-        size="lg"
+        size="sm"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2"
+        className="max-w-full truncate"
       >
-        <span>{isolated ? 'New worktree' : branch}</span>
-        <span aria-hidden>{open ? '▲' : '▼'}</span>
+        {isolated ? 'New worktree' : branch}
       </Button>
       {open && (
         <ul

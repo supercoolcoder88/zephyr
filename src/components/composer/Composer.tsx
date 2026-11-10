@@ -6,6 +6,7 @@ import {
   useState,
   type RefObject,
 } from 'react';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import type {
   AgentApi,
   Image,
@@ -87,6 +88,7 @@ export default function Composer({
   composer,
 }: Props) {
   const [tooBig, setTooBig] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [catalogStale, setCatalogStale] = useState(0);
   // Cached so the composer shows the model and effort before the catalog loads.
@@ -225,6 +227,7 @@ export default function Composer({
     onSend(text, images, choice);
     edit('');
     setTooBig(false);
+    setExpanded(false);
   }
 
   function choose(next: ModelChoice) {
@@ -258,7 +261,8 @@ export default function Composer({
         e.preventDefault();
         send(prompt);
       }}
-      className="relative flex shrink-0 items-end gap-2 border-t border-line bg-panel p-3"
+      data-expanded={expanded || undefined}
+      className="group relative flex shrink-0 flex-col gap-2 border-t border-line bg-panel p-3 data-expanded:h-3/4"
     >
       {options > 0 && (
         <ul
@@ -308,40 +312,40 @@ export default function Composer({
               ))}
         </ul>
       )}
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        {tooBig && (
-          <p className="text-2xs tracking-widest text-alert">
-            IMAGE OVER 5 MB · NOT ATTACHED
-          </p>
-        )}
-        {images.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {images.map((img, i) => (
-              <div key={i} className="relative border border-line">
-                <img
-                  src={`data:${img.mediaType};base64,${img.data}`}
-                  alt=""
-                  className="h-16 max-w-32 object-cover"
-                />
-                <button
-                  type="button"
-                  aria-label="Remove image"
-                  onClick={() =>
-                    onImages((prev) => prev.filter((_, j) => j !== i))
-                  }
-                  className="absolute top-0 right-0 bg-paper px-1 text-2xs text-void transition-colors duration-150 ease-mech hover:bg-ink"
-                >
-                  X
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="relative min-w-0 bg-void">
+      {tooBig && (
+        <p className="text-2xs tracking-widest text-alert">
+          IMAGE OVER 5 MB · NOT ATTACHED
+        </p>
+      )}
+      {images.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {images.map((img, i) => (
+            <div key={i} className="relative border border-line">
+              <img
+                src={`data:${img.mediaType};base64,${img.data}`}
+                alt=""
+                className="h-16 max-w-32 object-cover"
+              />
+              <button
+                type="button"
+                aria-label="Remove image"
+                onClick={() =>
+                  onImages((prev) => prev.filter((_, j) => j !== i))
+                }
+                className="absolute top-0 right-0 bg-paper px-1 text-2xs text-void transition-colors duration-150 ease-mech hover:bg-ink"
+              >
+                X
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1 flex-col border border-line bg-void focus-within:border-line-strong">
+        <div className="relative min-h-0 flex-1">
           <div
             ref={mirror}
             aria-hidden
-            className="absolute inset-0 overflow-hidden border border-transparent px-3 py-2.25 text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
+            className="absolute inset-0 overflow-hidden px-3 py-2.25 text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
           >
             {segments.map((s, i) =>
               s.kind ? (
@@ -357,7 +361,6 @@ export default function Composer({
           <textarea
             ref={composer}
             autoFocus
-            rows={3}
             role="combobox"
             aria-autocomplete="list"
             aria-expanded={options > 0}
@@ -439,34 +442,62 @@ export default function Composer({
               send(prompt);
             }}
             placeholder="Ask the agent…"
-            className="relative block w-full resize-none border border-line bg-transparent px-3 py-2.25 text-sm text-transparent caret-ink [scrollbar-gutter:stable] outline-none placeholder:text-mute focus:border-line-strong"
+            className="relative block max-h-[45vh] min-h-24 w-full resize-none bg-transparent px-3 py-2.25 text-sm text-transparent caret-ink [scrollbar-gutter:stable] outline-none field-sizing-content placeholder:text-mute group-data-expanded:h-full group-data-expanded:max-h-none group-data-expanded:field-sizing-fixed"
           />
         </div>
+        <div className="flex items-center gap-1 p-1 whitespace-nowrap">
+          <Button
+            size="sm"
+            aria-label="Expand composer"
+            aria-expanded={expanded}
+            onClick={() => {
+              setExpanded(!expanded);
+              composer.current?.focus();
+            }}
+            className="px-2"
+          >
+            {expanded ? (
+              <Minimize2
+                size={14}
+                strokeWidth={1.5}
+                strokeLinecap="square"
+                strokeLinejoin="miter"
+              />
+            ) : (
+              <Maximize2
+                size={14}
+                strokeWidth={1.5}
+                strokeLinecap="square"
+                strokeLinejoin="miter"
+              />
+            )}
+          </Button>
+          <div className="ml-auto flex min-w-0 items-center">
+            <BranchPicker
+              cwd={cwd}
+              isolated={isolated}
+              locked={locked}
+              onIsolate={onIsolate}
+              onMerge={onMerge}
+            />
+            <ModelPicker models={models} choice={choice} onChoose={choose} />
+          </div>
+          {running && (
+            <Button variant="outline-destructive" size="md" onClick={onCancel}>
+              [ STOP ]
+            </Button>
+          )}
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            disabled={!prompt.trim() && !images.length}
+            className="chamfer shrink-0 font-medium"
+          >
+            [ SEND ]
+          </Button>
+        </div>
       </div>
-      <div className="flex flex-col items-end">
-        <ModelPicker models={models} choice={choice} onChoose={choose} />
-        <BranchPicker
-          cwd={cwd}
-          isolated={isolated}
-          locked={locked}
-          onIsolate={onIsolate}
-          onMerge={onMerge}
-        />
-      </div>
-      {running && (
-        <Button variant="outline-destructive" size="lg" onClick={onCancel}>
-          [ STOP ]
-        </Button>
-      )}
-      <Button
-        type="submit"
-        variant="primary"
-        size="lg"
-        disabled={!prompt.trim() && !images.length}
-        className="chamfer font-medium"
-      >
-        [ SEND ]
-      </Button>
     </form>
   );
 }
