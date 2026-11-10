@@ -105,7 +105,7 @@ export default function ModelPicker({ models, choice, onChoose }: Props) {
                   <ul
                     role="menu"
                     aria-label={`${m.displayName} effort`}
-                    className="absolute right-full bottom-0 border border-b-0 border-line bg-panel py-1"
+                    className="absolute right-full bottom-0 border border-b-0 border-line bg-panel py-1 @max-md:-right-px @max-md:bottom-full"
                   >
                     {m.efforts.map((level) => {
                       const on = level === (active ? effort : m.defaultEffort);

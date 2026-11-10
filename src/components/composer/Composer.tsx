@@ -262,7 +262,7 @@ export default function Composer({
         send(prompt);
       }}
       data-expanded={expanded || undefined}
-      className="group relative flex shrink-0 flex-col gap-2 border-t border-line bg-panel p-3 data-expanded:h-3/4"
+      className="group @container relative flex shrink-0 flex-col gap-2 border-t border-line bg-panel p-3 data-expanded:h-3/4"
     >
       {options > 0 && (
         <ul
