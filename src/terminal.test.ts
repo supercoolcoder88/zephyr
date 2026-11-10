@@ -40,3 +40,11 @@ it('keeps the workspace shell alive and replays its output on reopen', async () 
   await vi.waitFor(() => expect(sent).toContainEqual(['terminal:exit', cwd]));
   expect(await call('terminal:open', cwd, 80, 24)).toBe('');
 });
+
+it('kills a workspace shell when its project closes', async () => {
+  const cwd = tmpdir();
+  await call('terminal:open', cwd, 80, 24);
+  sent.length = 0;
+  call('terminal:close', cwd);
+  await vi.waitFor(() => expect(sent).toContainEqual(['terminal:exit', cwd]));
+});

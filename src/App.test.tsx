@@ -142,6 +142,7 @@ const terminal = {
   open: vi.fn<TerminalApi['open']>(),
   write: vi.fn<TerminalApi['write']>(),
   resize: vi.fn<TerminalApi['resize']>(),
+  close: vi.fn<TerminalApi['close']>(),
   onData: vi.fn<TerminalApi['onData']>(),
   onExit: vi.fn<TerminalApi['onExit']>(),
 };
@@ -2084,4 +2085,38 @@ it('opens the workspace terminal from the backlog or Ctrl+`, keeping its display
   expect(dialog()).toBeNull();
   await user.keyboard('{Control>}[Backquote]{/Control}');
   await vi.waitFor(() => expect(terminal.open).toHaveBeenCalledTimes(2));
+});
+
+it('rebuilds the terminal on a theme change, drops it on a workspace switch and kills the shell when its project closes', async () => {
+  agent.listThreads.mockImplementation(async (cwd: string) =>
+    cwd === '/proj'
+      ? list
+      : [{ id: 'o', title: 'Other', createdAt: now, updatedAt: now }],
+  );
+  const theme = document.documentElement.dataset.theme;
+  onTestFinished(() => void (document.documentElement.dataset.theme = theme));
+  const opened = (cwd: string) =>
+    terminal.open.mock.calls.filter(([from]) => from === cwd).length;
+  const user = await open();
+  await openAnother(user, '/other');
+  await user.click(await screen.findByRole('button', { name: /Newest/ }));
+
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  await vi.waitFor(() => expect(opened('/proj')).toBe(1));
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  document.documentElement.dataset.theme =
+    theme === 'cyber' ? 'light' : 'cyber';
+  await vi.waitFor(() => expect(opened('/proj')).toBe(2));
+
+  await user.click(screen.getByRole('button', { name: /Other/ }));
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  await vi.waitFor(() => expect(opened('/other')).toBe(1));
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  await user.click(screen.getByRole('button', { name: /Newest/ }));
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  await vi.waitFor(() => expect(opened('/proj')).toBe(3));
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+
+  await user.click(screen.getByRole('button', { name: 'Close proj' }));
+  expect(terminal.close).toHaveBeenCalledWith('/proj');
 });

@@ -593,6 +593,7 @@ export default function App() {
   function closeProject(cwd: string) {
     setError(undefined);
     saveProjects((prev) => prev.filter((p) => p !== cwd));
+    window.terminal.close(cwd);
     for (const [runId, run] of runs.current) {
       if (run.cwd === cwd && !run.running)
         window.agent.close(runId).catch(report(run.id));

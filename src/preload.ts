@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('terminal', {
   write: (cwd, data) => ipcRenderer.send('terminal:write', cwd, data),
   resize: (cwd, cols, rows) =>
     ipcRenderer.send('terminal:resize', cwd, cols, rows),
+  close: (cwd) => ipcRenderer.send('terminal:close', cwd),
   onData: (listener) => {
     const handler = (_: IpcRendererEvent, cwd: string, data: string) =>
       listener(cwd, data);

@@ -214,6 +214,7 @@ export interface TerminalApi {
   open(cwd: string, cols: number, rows: number): Promise<string>;
   write(cwd: string, data: string): void;
   resize(cwd: string, cols: number, rows: number): void;
+  close(cwd: string): void;
   onData(listener: (cwd: string, data: string) => void): () => void;
   onExit(listener: (cwd: string) => void): () => void;
 }

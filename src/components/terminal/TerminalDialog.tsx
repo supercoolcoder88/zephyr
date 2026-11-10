@@ -1,8 +1,17 @@
-import { useEffect, useEffectEvent, useRef } from 'react';
+import { useEffect, useEffectEvent, useRef, useSyncExternalStore } from 'react';
 import { FitAddon, init, Terminal } from 'ghostty-web';
 import Button from '../ui/Button';
 
 const ready = init();
+
+const watchTheme = (onChange: () => void) => {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  });
+  return () => observer.disconnect();
+};
 
 interface Props {
   cwd: string;
@@ -11,10 +20,15 @@ interface Props {
   onExit(): void;
 }
 
-// Stays mounted while hidden so the display keeps its screen and scrollback.
+// Stays mounted while hidden on its workspace so the display keeps its screen and scrollback.
 export default function TerminalDialog({ cwd, open, onClose, onExit }: Props) {
   const screen = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal>(undefined);
+  // ghostty-web can't restyle a live display, so a theme change rebuilds it from the shell's saved output.
+  const theme = useSyncExternalStore(
+    watchTheme,
+    () => document.documentElement.dataset.theme,
+  );
   const exit = useEffectEvent(() => {
     if (open) onClose();
     onExit();
@@ -64,7 +78,7 @@ export default function TerminalDialog({ cwd, open, onClose, onExit }: Props) {
       cleanup.push(() => t.dispose());
       const output = await window.terminal.open(cwd, t.cols, t.rows);
       if (closed) return;
-      // Only non-empty after a window reload; ghostty-web throws on an empty write.
+      // Empty for a new shell, and ghostty-web throws on an empty write.
       if (output) t.write(output);
       term.current = t;
       if (!screen.current.closest('[inert]')) t.focus();
@@ -83,7 +97,7 @@ export default function TerminalDialog({ cwd, open, onClose, onExit }: Props) {
       closed = true;
       cleanup.forEach((fn) => fn());
     };
-  }, [cwd]);
+  }, [cwd, theme]);
 
   return (
     <div

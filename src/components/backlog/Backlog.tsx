@@ -52,9 +52,9 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
   const [renaming, setRenaming] = useState<string>();
   const [showDone, setShowDone] = useState(false);
   const [terminal, setTerminal] = useState(false);
-  // Workspaces whose terminal display has been opened and is kept mounted.
-  const [shells, setShells] = useState<string[]>([]);
-  if (terminal && !shells.includes(cwd)) setShells([...shells, cwd]);
+  // Only the active workspace keeps a display; others replay from their shell when revisited.
+  const [display, setDisplay] = useState<string>();
+  if (terminal && display !== cwd) setDisplay(cwd);
   const [dragKey, setDragKey] = useState<string>();
   const [over, setOver] = useState<{ key: string; side: 'before' | 'after' }>();
   const press = useRef({ x: 0, y: 0 });
@@ -343,15 +343,15 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
           </Button>
         </section>
       </Panel>
-      {shells.map((shell) => (
+      {display === cwd && (
         <TerminalDialog
-          key={shell}
-          cwd={shell}
-          open={terminal && shell === cwd}
+          key={cwd}
+          cwd={cwd}
+          open={terminal}
           onClose={() => setTerminal(false)}
-          onExit={() => setShells((list) => list.filter((s) => s !== shell))}
+          onExit={() => setDisplay(undefined)}
         />
-      ))}
+      )}
     </Group>
   );
 }

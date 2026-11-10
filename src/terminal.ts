@@ -45,6 +45,7 @@ export function registerTerminalIpc() {
   ipcMain.on('terminal:write', (_, cwd: string, data: string) =>
     shells.get(cwd)?.pty.write(data),
   );
+  ipcMain.on('terminal:close', (_, cwd: string) => shells.get(cwd)?.pty.kill());
   ipcMain.on('terminal:resize', (_, cwd: string, cols: number, rows: number) =>
     shells.get(cwd)?.pty.resize(cols, rows),
   );
