@@ -77,7 +77,7 @@ export default function ModelPicker({ models, choice, onChoose }: Props) {
         <ul
           ref={picker}
           role="menu"
-          className="absolute right-3 bottom-full border border-b-0 border-line bg-panel py-1"
+          className="absolute right-0 bottom-full border border-b-0 border-line bg-panel py-1"
         >
           {models.map((m) => {
             const active = m.value === choice.model;

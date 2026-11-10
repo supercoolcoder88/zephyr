@@ -94,6 +94,7 @@ export default function BranchPicker({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
+        title={branch}
         className="max-w-full truncate"
       >
         {isolated ? 'New worktree' : branch}
@@ -102,7 +103,7 @@ export default function BranchPicker({
         <ul
           role="menu"
           aria-label="Workspace"
-          className="absolute right-3 bottom-full border border-b-0 border-line bg-panel py-1"
+          className="absolute right-0 bottom-full border border-b-0 border-line bg-panel py-1"
         >
           <li>
             <MenuItem checked={!isolated} onClick={() => choose(false)}>

@@ -89,6 +89,7 @@ export default function Composer({
 }: Props) {
   const [tooBig, setTooBig] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const ExpandIcon = expanded ? Minimize2 : Maximize2;
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [catalogStale, setCatalogStale] = useState(0);
   // Cached so the composer shows the model and effort before the catalog loads.
@@ -262,14 +263,14 @@ export default function Composer({
         send(prompt);
       }}
       data-expanded={expanded || undefined}
-      className="group @container relative flex shrink-0 flex-col gap-2 border-t border-line bg-panel p-3 data-expanded:h-3/4"
+      className="group/composer @container relative flex shrink-0 flex-col gap-2 border-t border-line bg-panel p-3 data-expanded:h-3/4"
     >
       {options > 0 && (
         <ul
           ref={menu}
           id={listId}
           role="listbox"
-          className="absolute inset-x-0 bottom-full max-h-64 overflow-y-auto border-t border-line bg-panel py-1"
+          className="absolute inset-x-0 bottom-full max-h-64 group-data-expanded/composer:top-0 group-data-expanded/composer:bottom-auto overflow-y-auto border-t border-line bg-panel py-1"
         >
           {matches.length
             ? matches.map((c, i) => (
@@ -442,10 +443,10 @@ export default function Composer({
               send(prompt);
             }}
             placeholder="Ask the agent…"
-            className="relative block max-h-[45vh] min-h-24 w-full resize-none bg-transparent px-3 py-2.25 text-sm text-transparent caret-ink [scrollbar-gutter:stable] outline-none field-sizing-content placeholder:text-mute group-data-expanded:h-full group-data-expanded:max-h-none group-data-expanded:field-sizing-fixed"
+            className="relative block max-h-[45vh] min-h-24 w-full resize-none bg-transparent px-3 py-2.25 text-sm text-transparent caret-ink [scrollbar-gutter:stable] outline-none field-sizing-content placeholder:text-mute group-data-expanded/composer:h-full group-data-expanded/composer:max-h-none group-data-expanded/composer:field-sizing-fixed"
           />
         </div>
-        <div className="flex items-center gap-1 p-1 whitespace-nowrap">
+        <div className="relative flex items-center gap-1 p-1 whitespace-nowrap">
           <Button
             size="sm"
             aria-label="Expand composer"
@@ -454,23 +455,13 @@ export default function Composer({
               setExpanded(!expanded);
               composer.current?.focus();
             }}
-            className="px-2"
           >
-            {expanded ? (
-              <Minimize2
-                size={14}
-                strokeWidth={1.5}
-                strokeLinecap="square"
-                strokeLinejoin="miter"
-              />
-            ) : (
-              <Maximize2
-                size={14}
-                strokeWidth={1.5}
-                strokeLinecap="square"
-                strokeLinejoin="miter"
-              />
-            )}
+            <ExpandIcon
+              size={14}
+              strokeWidth={1.5}
+              strokeLinecap="square"
+              strokeLinejoin="miter"
+            />
           </Button>
           <div className="ml-auto flex min-w-0 items-center">
             <BranchPicker

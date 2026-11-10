@@ -70,6 +70,17 @@ export default function ChatThread({
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [items.length, permissions.length, thread.queued?.length]);
 
+  // The composer grows and expands, so keep the newest message in view as the transcript shrinks.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   function readSelection() {
     const sel = document.getSelection();
     const el = scroller.current;
