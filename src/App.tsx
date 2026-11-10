@@ -20,6 +20,10 @@ import {
 
 type Listed = Awaited<ReturnType<typeof window.agent.listThreads>>;
 
+const MAX_PROJECTS = 4;
+const stored = (key: string): string[] =>
+  JSON.parse(localStorage.getItem(key) ?? '[]');
+
 // Keeps unsent drafts and running threads the list doesn't know about yet,
 // plus loaded transcripts and render keys of listed threads.
 function merge(
@@ -61,12 +65,13 @@ function merge(
 }
 
 export default function App() {
-  const [workspace, setWorkspace] = useState<string>();
+  const [projects, setProjects] = useState(() => stored('projects'));
+  const [collapsed, setCollapsed] = useState(() => stored('collapsed'));
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeId, setActiveId] = useState<string>();
   const [runningIds, setRunningIds] = useState<string[]>([]);
   const [finishedId, setFinishedId] = useState<string>();
-  const [deleteError, setDeleteError] = useState<string>();
+  const [error, setError] = useState<string>();
   const [choices, setChoices] = useState<ArchiveChoices>(() =>
     JSON.parse(localStorage.getItem('archived') ?? '{}'),
   );
@@ -286,7 +291,7 @@ export default function App() {
   );
 
   const visible = threads
-    .filter((t) => t.cwd === workspace)
+    .filter((t) => projects.includes(t.cwd))
     .toSorted((a, b) => b.createdAt - a.createdAt);
   const { current, archived } = listThreads(
     visible,
@@ -308,7 +313,7 @@ export default function App() {
 
   function send(prompt: string, images: Image[], choice: ModelChoice) {
     if (!active) return;
-    setDeleteError(undefined);
+    setError(undefined);
     const { id, cwd, draft, isolated, worktree } = active;
     const uuid = crypto.randomUUID();
     const message = {
@@ -407,7 +412,7 @@ export default function App() {
     );
     setActiveId(thread.id);
     setFinishedId(undefined);
-    setDeleteError(undefined);
+    setError(undefined);
     if (thread.items) return;
     window.agent.loadThread(thread.id, thread.worktree ?? thread.cwd).then(
       (items) => patch(thread.id, (t) => ({ ...t, items })),
@@ -424,10 +429,12 @@ export default function App() {
     );
   }
 
-  function create(prompt?: string) {
-    if (!workspace) return;
+  function create(prompt?: string, cwd = active?.cwd) {
+    if (!cwd) return;
+    if (collapsed.includes(cwd)) toggle(cwd);
     const empty = visible.find(
       (t) =>
+        t.cwd === cwd &&
         t.draft &&
         t.items?.length === 0 &&
         !t.prompt?.trim() &&
@@ -439,7 +446,7 @@ export default function App() {
       composer.current?.focus();
       return;
     }
-    const thread = newThread(workspace);
+    const thread = newThread(cwd);
     setThreads((prev) => [{ ...thread, prompt }, ...prev]);
     select(thread);
   }
@@ -457,7 +464,7 @@ export default function App() {
   async function remove(id: string) {
     const thread = visible.find((t) => t.id === id)!;
     if (runningIds.includes(id)) return;
-    setDeleteError(undefined);
+    setError(undefined);
     const runId = runOf(id);
     if (runId) {
       runs.current.delete(runId);
@@ -467,15 +474,16 @@ export default function App() {
       try {
         await window.agent.deleteThread(id, thread.cwd, thread.worktree);
       } catch (err) {
-        setDeleteError(err instanceof Error ? err.message : String(err));
+        setError(err instanceof Error ? err.message : String(err));
         return;
       }
     }
     setThreads((prev) => prev.filter((t) => t.id !== id));
     choose(id, undefined);
     if (thread !== active) return;
-    const i = current.indexOf(thread);
-    const next = current[i + 1] ?? current[i - 1];
+    const siblings = current.filter((t) => t.cwd === thread.cwd);
+    const i = siblings.indexOf(thread);
+    const next = siblings[i + 1] ?? siblings[i - 1];
     if (next) return select(next);
     const fresh = newThread(thread.cwd);
     setThreads((prev) => [fresh, ...prev]);
@@ -495,10 +503,25 @@ export default function App() {
     await remove(thread.id);
   }
 
-  async function openWorkspace(picked?: string) {
-    setDeleteError(undefined);
-    const cwd = picked ?? (await window.agent.pickWorkspace());
-    if (!cwd || cwd === workspace) return;
+  function saveProjects(update: (prev: string[]) => string[]) {
+    setProjects((prev) => {
+      const next = update(prev);
+      localStorage.setItem('projects', JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function toggle(cwd: string) {
+    setCollapsed((prev) => {
+      const next = prev.includes(cwd)
+        ? prev.filter((p) => p !== cwd)
+        : [...prev, cwd];
+      localStorage.setItem('collapsed', JSON.stringify(next));
+      return next;
+    });
+  }
+
+  async function load(cwd: string) {
     const list = await window.agent.listThreads(cwd);
     const mine = merge(
       threads.filter((t) => t.cwd === cwd),
@@ -508,17 +531,43 @@ export default function App() {
     );
     const loaded = mine.length ? mine : [newThread(cwd)];
     setThreads((prev) => [...prev.filter((t) => t.cwd !== cwd), ...loaded]);
-    setWorkspace(cwd);
-    select(loaded[0]);
-    for (const [runId, run] of runs.current) {
-      if (run.cwd === workspace && !run.running)
-        window.agent.close(runId).catch(report(run.id));
-    }
+    return loaded;
   }
 
+  async function openProject() {
+    setError(undefined);
+    const cwd = await window.agent.pickWorkspace();
+    if (!cwd) return;
+    if (!projects.includes(cwd) && projects.length >= MAX_PROJECTS)
+      return setError('Close a project to open another');
+    const loaded = await load(cwd);
+    saveProjects((prev) => (prev.includes(cwd) ? prev : [...prev, cwd]));
+    if (collapsed.includes(cwd)) toggle(cwd);
+    select(loaded[0]);
+  }
+
+  function closeProject(cwd: string) {
+    setError(undefined);
+    saveProjects((prev) => prev.filter((p) => p !== cwd));
+    for (const [runId, run] of runs.current) {
+      if (run.cwd === cwd && !run.running)
+        window.agent.close(runId).catch(report(run.id));
+    }
+    const next = [...current, ...archived].find((t) => t.cwd !== cwd);
+    if (active?.cwd === cwd && next) select(next);
+  }
+
+  // Reopens the saved projects, plus the folder zephyr was launched with.
   useEffect(() => {
     const launched = new URLSearchParams(location.search).get('workspace');
-    if (launched) openWorkspace(launched);
+    const dirs = [
+      ...new Set([...projects, ...(launched ? [launched] : [])]),
+    ].slice(-MAX_PROJECTS);
+    saveProjects(() => dirs);
+    Promise.all(dirs.map((cwd) => load(cwd).catch(() => []))).then((loaded) => {
+      const first = loaded[launched ? dirs.indexOf(launched) : 0]?.[0];
+      if (first) select(first);
+    });
   }, []);
 
   if (!active) {
@@ -533,7 +582,7 @@ export default function App() {
         <Button
           variant="primary"
           size="lg"
-          onClick={() => openWorkspace()}
+          onClick={openProject}
           className="chamfer px-6"
         >
           [ OPEN FOLDER ]
@@ -558,16 +607,20 @@ export default function App() {
         >
           <Sidebar
             workspace={active.cwd}
-            onOpenWorkspace={() => openWorkspace()}
+            projects={projects}
+            collapsed={collapsed}
+            onToggle={toggle}
+            onOpenProject={openProject}
+            onCloseProject={closeProject}
             current={current}
             archived={archived}
             onArchive={(id, value) => choose(id, value || Date.now())}
             activeId={active.id}
             runningIds={runningIds}
             onSelect={(id) => select(visible.find((t) => t.id === id)!)}
-            onNew={() => create()}
+            onNew={(cwd) => create(undefined, cwd)}
             onDelete={remove}
-            error={deleteError}
+            error={error}
             permission={permission}
             onPermission={(next) => {
               setPermission(next);

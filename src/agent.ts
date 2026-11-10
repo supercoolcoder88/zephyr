@@ -100,7 +100,7 @@ function options(cwd: string): Options {
 }
 
 const IDLE_MS = 10 * 60_000;
-const MAX_SESSIONS = 4;
+const MAX_SESSIONS = 6;
 
 type Answer = (allow: boolean, answers?: Record<string, string>) => void;
 

@@ -1,7 +1,10 @@
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
+  ChevronRight,
   GitBranch,
+  Plus,
   Settings as SettingsIcon,
   X,
 } from 'lucide-react';
@@ -13,14 +16,18 @@ import Settings from '../settings/Settings';
 
 interface Props {
   workspace: string;
-  onOpenWorkspace(): void;
+  projects: string[];
+  collapsed: string[];
+  onToggle(cwd: string): void;
+  onOpenProject(): void;
+  onCloseProject(cwd: string): void;
   current: Thread[];
   archived: Thread[];
   onArchive(id: string, value: boolean): void;
   activeId: string;
   runningIds: string[];
   onSelect(id: string): void;
-  onNew(): void;
+  onNew(cwd?: string): void;
   onDelete(id: string): void;
   error?: string;
   permission: Permission;
@@ -34,9 +41,15 @@ const icon = {
   strokeLinejoin: 'miter',
 } as const;
 
+const projectName = (cwd: string) => cwd.split(/[\\/]/).filter(Boolean).pop();
+
 export default function Sidebar({
   workspace,
-  onOpenWorkspace,
+  projects,
+  collapsed,
+  onToggle,
+  onOpenProject,
+  onCloseProject,
   current,
   archived,
   onArchive,
@@ -58,6 +71,9 @@ export default function Sidebar({
     window.update.check().then(setUpdate, () => {});
   }, []);
 
+  const expanded = projects.filter((p) => !collapsed.includes(p));
+  const listed = (cwd: string) => current.filter((t) => t.cwd === cwd);
+
   const lastRead = useRef<string>(undefined);
   useEffect(() => () => void (lastRead.current = activeId), [activeId]);
 
@@ -68,7 +84,10 @@ export default function Sidebar({
       return;
     const key = e.key.toLowerCase();
     if (key === 'tab') {
-      const shown = showArchived ? [...current, ...archived] : current;
+      const shown = [
+        ...expanded.flatMap(listed),
+        ...(showArchived ? archived : []),
+      ];
       const cycle =
         localStorage.getItem('cycle') === 'all'
           ? shown
@@ -82,7 +101,7 @@ export default function Sidebar({
       const next = cycle.at((i + (e.shiftKey ? -1 : 1)) % cycle.length);
       if (next && next.id !== activeId) onSelect(next.id);
     } else if (key === 'n') onNew();
-    else if (key === 'o') onOpenWorkspace();
+    else if (key === 'o') onOpenProject();
     else if (key === ',') setSettingsOpen(true);
     else return;
     e.preventDefault();
@@ -119,7 +138,16 @@ export default function Sidebar({
             aria-label={threadState(thread, runningIds)}
             className={`size-1.5 shrink-0 ${stateDot[threadState(thread, runningIds)]}`}
           />
-          <span className="flex-1 truncate">{thread.title}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">{thread.title}</span>
+            {isArchived && (
+              <span
+                className={`block truncate text-2xs ${active ? 'text-void/50' : 'text-mute'}`}
+              >
+                {projectName(thread.cwd)}
+              </span>
+            )}
+          </span>
           {thread.worktree && (
             <span
               title={thread.branch}
@@ -176,10 +204,54 @@ export default function Sidebar({
             <span className="text-2xs tracking-widest text-mute">DEV</span>
           )}
         </span>
-        <Button onClick={onNew}>[ + NEW ]</Button>
+        <Button onClick={() => onNew()}>[ + NEW ]</Button>
       </header>
       <nav className="flex-1 overflow-y-auto py-2">
-        {current.map((t) => row(t))}
+        {projects.map((cwd) => {
+          const name = projectName(cwd);
+          const open = expanded.includes(cwd);
+          return (
+            <section key={cwd} aria-label={name}>
+              <div className="group flex h-8 items-center text-2xs tracking-widest text-mute">
+                <h2 className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    title={cwd}
+                    aria-expanded={open}
+                    onClick={() => onToggle(cwd)}
+                    className="flex h-8 w-full items-center gap-2 pl-4 uppercase transition-colors duration-150 ease-mech hover:text-ink"
+                  >
+                    {open ? (
+                      <ChevronDown {...icon} />
+                    ) : (
+                      <ChevronRight {...icon} />
+                    )}
+                    <span className="truncate">{name}</span>
+                  </button>
+                </h2>
+                <span className="flex items-center gap-1 pr-4 pl-3 opacity-0 transition-opacity duration-150 ease-mech group-focus-within:opacity-100 group-hover:opacity-100">
+                  <button
+                    type="button"
+                    aria-label={`New in ${name}`}
+                    onClick={() => onNew(cwd)}
+                    className="grid size-5 place-items-center transition-colors duration-150 ease-mech hover:text-ink"
+                  >
+                    <Plus {...icon} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Close ${name}`}
+                    onClick={() => onCloseProject(cwd)}
+                    className="grid size-5 place-items-center transition-colors duration-150 ease-mech hover:text-ink"
+                  >
+                    <X {...icon} />
+                  </button>
+                </span>
+              </div>
+              {open && listed(cwd).map((t) => row(t))}
+            </section>
+          );
+        })}
         {archived.length > 0 && (
           <>
             <Button
@@ -212,14 +284,8 @@ export default function Sidebar({
             />
           )}
         </Button>
-        <Button
-          title={workspace}
-          onClick={onOpenWorkspace}
-          className="ml-3 min-w-0"
-        >
-          <span className="block truncate uppercase">
-            {workspace.split(/[\\/]/).filter(Boolean).pop()}
-          </span>
+        <Button onClick={onOpenProject} className="ml-auto">
+          [ + PROJECT ]
         </Button>
       </footer>
       {settingsOpen && (

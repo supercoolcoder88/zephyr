@@ -39,6 +39,11 @@ export function Questions({
   const [other, setOther] = useState(() => questions.map(() => ''));
   const reply = (i: number) =>
     [...picked[i], other[i].trim()].filter(Boolean).join(', ');
+  const ready = questions.every((_, i) => reply(i));
+  const submit = () =>
+    onAnswer?.(
+      Object.fromEntries(questions.map((q, i) => [q.question, reply(i)])),
+    );
   const Row = onAnswer ? 'label' : 'div';
   const row =
     'group relative flex gap-3 px-2 py-1 has-checked:bg-paper has-checked:text-void has-focus-visible:outline has-focus-visible:outline-cyan has-[input]:cursor-pointer has-[input]:hover:bg-line has-checked:hover:bg-ink';
@@ -46,6 +51,12 @@ export function Questions({
     <div
       role="group"
       aria-label="Questions"
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' || !onAnswer || !ready) return;
+        if (e.target instanceof HTMLButtonElement) return;
+        e.preventDefault();
+        submit();
+      }}
       className={`divide-y divide-line border bg-panel text-sm transition-colors duration-200 ease-mech ${
         live ? 'border-cyan' : onAnswer ? 'border-line-strong' : 'border-line'
       }`}
@@ -142,14 +153,8 @@ export function Questions({
           <Button
             variant="primary"
             size="md"
-            disabled={questions.some((_, i) => !reply(i))}
-            onClick={() =>
-              onAnswer(
-                Object.fromEntries(
-                  questions.map((q, i) => [q.question, reply(i)]),
-                ),
-              )
-            }
+            disabled={!ready}
+            onClick={submit}
           >
             [ SUBMIT ]
           </Button>

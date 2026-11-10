@@ -758,15 +758,16 @@ describe('agent:send', () => {
     it('past the cap, closes the least recently used idle session but never a busy one', async () => {
       const s = sender();
       const queries: FakeQuery[] = [];
-      for (const runId of ['b1', 'b2', 'b3', 'b4']) {
-        await send(s, runId, 'a');
+      const cap = ['1', '2', '3', '4', '5', '6'];
+      for (const n of cap) {
+        await send(s, `b${n}`, 'a');
         queries.push(lastQuery());
       }
-      await send(s, 'b5', 'a');
+      await send(s, 'b7', 'a');
       for (const q of queries) expect(q.close).not.toHaveBeenCalled();
-      expect(sdk.query).toHaveBeenCalledTimes(5);
-      for (const runId of ['b1', 'b2', 'b3', 'b4', 'b5'])
-        await handlers.get('agent:close')!({}, runId);
+      expect(sdk.query).toHaveBeenCalledTimes(7);
+      for (const n of [...cap, '7'])
+        await handlers.get('agent:close')!({}, `b${n}`);
 
       const idle = async (runId: string, q?: FakeQuery) => {
         if (!q) await send(s, runId, 'a');
@@ -775,17 +776,14 @@ describe('agent:send', () => {
         vi.advanceTimersByTime(1);
         return q ?? lastQuery();
       };
-      const [l1, l2, l3, l4] = [
-        await idle('l1'),
-        await idle('l2'),
-        await idle('l3'),
-        await idle('l4'),
-      ];
+      const idles: FakeQuery[] = [];
+      for (const n of cap) idles.push(await idle(`l${n}`));
+      const [l1, l2, ...rest] = idles;
       await send(s, 'l1', 'b');
       await idle('l1', l1);
-      await send(s, 'l5', 'a');
+      await send(s, 'l7', 'a');
       expect(l2.close).toHaveBeenCalled();
-      for (const q of [l1, l3, l4]) expect(q.close).not.toHaveBeenCalled();
+      for (const q of [l1, ...rest]) expect(q.close).not.toHaveBeenCalled();
     });
   });
 });

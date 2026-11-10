@@ -168,6 +168,7 @@ const list = [
 const sidebarTitles = () =>
   within(screen.getByRole('navigation'))
     .getAllByRole('button')
+    .filter((b) => !b.closest('h2'))
     .map((b) => b.textContent)
     .filter((t) => t && t !== '[ CONFIRM ]');
 
@@ -179,6 +180,19 @@ async function open() {
   await user.click(screen.getByRole('button', { name: '[ OPEN FOLDER ]' }));
   await screen.findByRole('navigation');
   return user;
+}
+
+async function restart() {
+  cleanup();
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByRole('navigation');
+  return user;
+}
+
+async function openAnother(user: User, cwd: string) {
+  agent.pickWorkspace.mockResolvedValue(cwd);
+  await user.click(screen.getByRole('button', { name: '[ + PROJECT ]' }));
 }
 
 async function sendPrompt(user: User, text: string) {
@@ -592,8 +606,8 @@ it('archives threads untouched since before today, except unmerged worktrees', a
     'Today',
     'Old worktree',
     '[ HIDE ARCHIVED ]',
-    'Yesterday',
-    'Old',
+    'Yesterdayproj',
+    'Oldproj',
   ]);
 });
 
@@ -603,15 +617,13 @@ it('archives a thread by hand and unarchives it to the top, across restarts', as
   await user.click(row(/Newest/).getByRole('button', { name: 'Archive' }));
   expect(sidebarTitles()).toEqual(['Older', '[ ARCHIVED 1 ]']);
 
-  cleanup();
-  user = await open();
+  user = await restart();
   await user.click(screen.getByRole('button', { name: '[ ARCHIVED 1 ]' }));
   await user.click(row(/Older/).getByRole('button', { name: 'Archive' }));
   await user.click(row(/Older/).getByRole('button', { name: 'Unarchive' }));
-  expect(sidebarTitles()).toEqual(['Older', '[ HIDE ARCHIVED ]', 'Newest']);
+  expect(sidebarTitles()).toEqual(['Older', '[ HIDE ARCHIVED ]', 'Newestproj']);
 
-  cleanup();
-  await open();
+  await restart();
   expect(sidebarTitles()).toEqual(['Older', '[ ARCHIVED 1 ]']);
 });
 
@@ -1066,7 +1078,99 @@ it('stops the turn without ending the session, showing a failed stop as an error
   expect(await screen.findByText('session closing')).toHaveClass('text-alert');
 });
 
-it("closes the left project's idle sessions and resumes them on return", async () => {
+it('lists open projects side by side, collapsing them and starting threads in each', async () => {
+  agent.listThreads.mockImplementation(async (cwd: string) =>
+    cwd === '/proj'
+      ? list
+      : [{ id: 'o', title: 'Other', createdAt: now, updatedAt: now }],
+  );
+  const user = await open();
+  await openAnother(user, '/other');
+  expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent(
+    'Other',
+  );
+  expect(sidebarTitles()).toEqual(['Newest', 'Older', 'Other']);
+
+  await user.click(screen.getByRole('button', { name: 'proj' }));
+  expect(sidebarTitles()).toEqual(['Other']);
+  await user.keyboard('{Control>}{Tab}{/Control}');
+  expect(heading()).toBe('Other');
+
+  await user.click(screen.getByRole('button', { name: 'New in proj' }));
+  expect(heading()).toBe('New thread');
+  expect(sidebarTitles()).toEqual(['New thread', 'Newest', 'Older', 'Other']);
+  await sendPrompt(user, 'hi');
+  expect(agent.send).toHaveBeenLastCalledWith(
+    expect.any(String),
+    'hi',
+    [],
+    '/proj',
+    undefined,
+    { model: 'opus' },
+    'auto',
+    expect.any(String),
+  );
+});
+
+it('reopens the projects left open, collapsed as they were, across restarts', async () => {
+  agent.listThreads.mockImplementation(async (cwd: string) =>
+    cwd === '/proj'
+      ? list
+      : [{ id: 'o', title: 'Other', createdAt: now, updatedAt: now }],
+  );
+  const user = await open();
+  await openAnother(user, '/other');
+  await screen.findByRole('button', { name: /Other/ });
+  await user.click(screen.getByRole('button', { name: 'other' }));
+
+  await restart();
+  expect(agent.pickWorkspace).toHaveBeenCalledTimes(2);
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
+  expect(screen.getByRole('button', { name: 'other' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+});
+
+it('opens at most four projects', async () => {
+  const user = await open();
+  for (const cwd of ['/b', '/c', '/d']) await openAnother(user, cwd);
+  await openAnother(user, '/e');
+  expect(screen.getByText('Close a project to open another')).toBeVisible();
+  expect(agent.listThreads).not.toHaveBeenCalledWith('/e');
+
+  await user.click(screen.getByRole('button', { name: 'Close b' }));
+  await openAnother(user, '/e');
+  expect(await screen.findByRole('button', { name: 'e' })).toBeVisible();
+  expect(
+    screen.queryByText('Close a project to open another'),
+  ).not.toBeInTheDocument();
+});
+
+it('keeps one archive for every project, naming the project under each title', async () => {
+  const day = 86_400_000;
+  agent.listThreads.mockImplementation(async (cwd: string) => [
+    {
+      id: cwd,
+      title: 'Old',
+      createdAt: now - day,
+      updatedAt: now - day,
+    },
+  ]);
+  const user = await open();
+  await openAnother(user, '/other');
+  await screen.findByRole('button', { name: 'other' });
+  await user.click(screen.getByRole('button', { name: '[ + NEW ]' }));
+  await user.click(screen.getByRole('button', { name: '[ ARCHIVED 2 ]' }));
+  expect(sidebarTitles()).toEqual([
+    'New thread',
+    '[ HIDE ARCHIVED ]',
+    'Oldproj',
+    'Oldother',
+  ]);
+});
+
+it("closes a project's idle sessions, leaving running ones, and resumes them on reopen", async () => {
   agent.listThreads.mockImplementation(async (cwd: string) =>
     cwd === '/proj'
       ? list
@@ -1079,15 +1183,16 @@ it("closes the left project's idle sessions and resumes them on return", async (
   await user.click(screen.getByRole('button', { name: /Older/ }));
   await sendPrompt(user, 'second');
   const busyRun = lastRunId();
-
-  agent.pickWorkspace.mockResolvedValue('/other');
-  await user.click(screen.getByRole('button', { name: 'proj' }));
+  await openAnother(user, '/other');
   await screen.findByRole('button', { name: /Other/ });
+
+  await user.click(screen.getByRole('button', { name: 'Close proj' }));
+  expect(sidebarTitles()).toEqual(['Other']);
+  expect(heading()).toBe('Other');
   expect(agent.close).toHaveBeenCalledWith(idleRun);
   expect(agent.close).not.toHaveBeenCalledWith(busyRun);
 
-  agent.pickWorkspace.mockResolvedValue('/proj');
-  await user.click(screen.getByRole('button', { name: 'other' }));
+  await openAnother(user, '/proj');
   await user.click(await screen.findByRole('button', { name: /Newest/ }));
   await sendPrompt(user, 'again');
   expect(agent.send).toHaveBeenLastCalledWith(
@@ -1165,6 +1270,9 @@ it('shows a pending question in a box that takes picked options or a skip', asyn
   expect(box).toHaveTextContent('01Env varSkip the dialog.');
   expect(box).toHaveTextContent('02Inspector');
   const submit = within(box).getByRole('button', { name: '[ SUBMIT ]' });
+  await user.click(within(box).getByRole('radio', { name: /Env var/ }));
+  await user.keyboard('{Enter}');
+  expect(agent.answerPermission).not.toHaveBeenCalled();
   const [ownWay, otherSuite] = within(box).getAllByRole('textbox', {
     name: 'Other',
   });
@@ -1175,8 +1283,7 @@ it('shows a pending question in a box that takes picked options or a skip', asyn
     within(box).getByRole('radio', { name: /Inspector/ }),
   ).not.toBeChecked();
   await user.click(within(box).getByRole('checkbox', { name: /CLI/ }));
-  await user.type(otherSuite, 'Playwright');
-  await user.click(submit);
+  await user.type(otherSuite, 'Playwright{Enter}');
   const answers = {
     'Which workspace?': 'My own way',
     'Which suites?': 'CLI, Playwright',
