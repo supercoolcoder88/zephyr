@@ -32,7 +32,7 @@ export default function Button({
   return (
     <button
       type={type}
-      className={`inline-flex items-center gap-2 text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex items-center text-2xs tracking-widest uppercase transition-colors duration-150 ease-mech ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
     />
   );

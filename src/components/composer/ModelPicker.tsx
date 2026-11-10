@@ -30,7 +30,7 @@ export default function ModelPicker({ models, choice, onChoose }: Props) {
   return (
     <div
       ref={root}
-      className="min-w-0"
+      className="flex min-w-0"
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget)) setPicking(false);
       }}

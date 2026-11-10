@@ -143,7 +143,7 @@ export default function ChatThread({
             <p className="indent-[0.1em] text-5xl font-medium tracking-widest">
               READY
             </p>
-            <p className="text-2xs tracking-widest text-mute">
+            <p className="indent-[0.1em] text-2xs tracking-widest text-mute">
               NO MESSAGES YET
             </p>
           </div>

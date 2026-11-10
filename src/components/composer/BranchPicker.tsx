@@ -68,7 +68,7 @@ export default function BranchPicker({
   return (
     <div
       ref={root}
-      className="shrink-0"
+      className="flex shrink-0"
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
       }}

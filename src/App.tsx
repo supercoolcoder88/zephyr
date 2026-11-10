@@ -626,7 +626,9 @@ export default function App() {
             ZEPHYR
           </h1>
           {import.meta.env.DEV && (
-            <span className="text-2xs tracking-widest text-mute">DEV</span>
+            <span className="indent-[0.1em] text-2xs tracking-widest text-mute">
+              DEV
+            </span>
           )}
         </div>
         <Button

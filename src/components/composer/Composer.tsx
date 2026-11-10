@@ -448,7 +448,7 @@ export default function Composer({
         </div>
         <div className="relative flex items-center gap-1 p-1 whitespace-nowrap">
           <Button
-            size="sm"
+            size="icon"
             aria-label="Expand composer"
             aria-expanded={expanded}
             onClick={() => {
