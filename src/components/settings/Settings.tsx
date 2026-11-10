@@ -40,6 +40,7 @@ const hotkeys = [
   ['Open folder', 'Ctrl + O'],
   ['Open settings', 'Ctrl + ,'],
   ['Toggle backlog', 'Ctrl + T'],
+  ['Toggle terminal', 'Ctrl + `'],
   ['Close popup', 'Esc'],
 ];
 

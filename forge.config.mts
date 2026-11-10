@@ -9,19 +9,20 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import { cp } from 'node:fs/promises';
 import path from 'node:path';
 
-// The Vite plugin only packages its own build output, so the Agent SDK
-// (kept external in vite.main.config.mts) and its native CLI binary are
-// copied in by hand.
-const agentSdkPackages = (platform: string, arch: string) => [
+// The Vite plugin only packages its own build output, so the packages kept
+// external in vite.main.config.mts and their native binaries are copied in by hand.
+const externalPackages = (platform: string, arch: string) => [
   '@anthropic-ai/claude-agent-sdk',
   `@anthropic-ai/claude-agent-sdk-${platform}-${arch}`,
+  'node-pty',
 ];
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: {
       // A binary can't be executed from inside the asar archive.
-      unpack: '**/node_modules/@anthropic-ai/claude-agent-sdk-*/**',
+      unpack:
+        '{**/node_modules/@anthropic-ai/claude-agent-sdk-*/**,**/node_modules/node-pty/**}',
     },
   },
   hooks: {
@@ -32,7 +33,7 @@ const config: ForgeConfig = {
       platform,
       arch,
     ) => {
-      for (const pkg of agentSdkPackages(platform, arch)) {
+      for (const pkg of externalPackages(platform, arch)) {
         await cp(
           path.join(import.meta.dirname, 'node_modules', pkg),
           path.join(buildPath, 'node_modules', pkg),

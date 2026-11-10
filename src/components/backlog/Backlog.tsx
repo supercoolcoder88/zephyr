@@ -15,6 +15,7 @@ import {
   usePanelRef,
 } from 'react-resizable-panels';
 import type { BacklogEntry, BacklogEdit } from '../../agent-types';
+import TerminalDialog from '../terminal/TerminalDialog';
 import Button from '../ui/Button';
 
 export const backlogType = 'application/x-zephyr-backlog';
@@ -50,6 +51,10 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
   const [draft, setDraft] = useState('');
   const [renaming, setRenaming] = useState<string>();
   const [showDone, setShowDone] = useState(false);
+  const [terminal, setTerminal] = useState(false);
+  // Workspaces whose terminal display has been opened and is kept mounted.
+  const [shells, setShells] = useState<string[]>([]);
+  if (terminal && !shells.includes(cwd)) setShells([...shells, cwd]);
   const [dragKey, setDragKey] = useState<string>();
   const [over, setOver] = useState<{ key: string; side: 'before' | 'after' }>();
   const press = useRef({ x: 0, y: 0 });
@@ -99,8 +104,19 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
       e.preventDefault();
       toggle();
     };
+    // Captured so the terminal never receives its own toggle.
+    const onTerminalKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.code !== 'Backquote') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setTerminal((open) => !open);
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onTerminalKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onTerminalKey, true);
+    };
   }, []);
 
   useEffect(() => () => clearTimeout(snap.current), []);
@@ -316,8 +332,26 @@ export default function Backlog({ cwd, onDragging, children }: Props) {
             {rows.length === pending.length && doneToggle}
           </ul>
           {error && <p className="px-4 py-2 text-2xs text-alert">{error}</p>}
+          <Button
+            size="lg"
+            aria-expanded={terminal}
+            title="Toggle terminal (Ctrl+`)"
+            onClick={() => setTerminal(true)}
+            className="w-full shrink-0 border-t border-line hover:bg-line"
+          >
+            [ TERMINAL ]
+          </Button>
         </section>
       </Panel>
+      {shells.map((shell) => (
+        <TerminalDialog
+          key={shell}
+          cwd={shell}
+          open={terminal && shell === cwd}
+          onClose={() => setTerminal(false)}
+          onExit={() => setShells((list) => list.filter((s) => s !== shell))}
+        />
+      ))}
     </Group>
   );
 }

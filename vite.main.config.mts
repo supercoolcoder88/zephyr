@@ -4,9 +4,9 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   build: {
     rollupOptions: {
-      // ESM-only, and resolves its native CLI binary from node_modules at
-      // runtime, so it must not be bundled into main.cjs.
-      external: ['@anthropic-ai/claude-agent-sdk'],
+      // Both load native binaries from node_modules at runtime, so they must
+      // not be bundled into main.cjs.
+      external: ['@anthropic-ai/claude-agent-sdk', 'node-pty'],
     },
   },
 });

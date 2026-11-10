@@ -6,4 +6,5 @@ interface Window {
   agent: import('./agent-types').AgentApi;
   backlog: import('./agent-types').BacklogApi;
   update: import('./agent-types').UpdateApi;
+  terminal: import('./agent-types').TerminalApi;
 }

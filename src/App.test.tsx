@@ -10,7 +10,41 @@ import userEvent from '@testing-library/user-event';
 import type { ComponentProps, ReactNode, Ref } from 'react';
 import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import App from './App';
-import type { AgentEvent, BacklogEntry, BacklogApi } from './agent-types';
+import type {
+  AgentEvent,
+  BacklogEntry,
+  BacklogApi,
+  TerminalApi,
+} from './agent-types';
+
+// jsdom has no canvas, so the terminal records what it is asked to show.
+const screenText: string[] = [];
+let typeInTerminal: (data: string) => void;
+vi.mock('ghostty-web', () => ({
+  init: async () => undefined,
+  FitAddon: class {
+    fit() {}
+    observeResize() {}
+  },
+  Terminal: class {
+    cols = 80;
+    rows = 24;
+    loadAddon() {}
+    open() {}
+    focus() {}
+    dispose() {}
+    write(data: string) {
+      screenText.push(data);
+    }
+    onData(fn: (data: string) => void) {
+      typeInTerminal = fn;
+      return { dispose() {} };
+    }
+    onResize() {
+      return { dispose() {} };
+    }
+  },
+}));
 
 // jsdom gives every element a zero-size box, so the library's pointer hit-testing
 // would treat every click as a separator drag. The fake panel collapses and
@@ -104,6 +138,13 @@ const backlog = {
   edit: vi.fn<BacklogApi['edit']>(),
   onChange: vi.fn<BacklogApi['onChange']>(),
 };
+const terminal = {
+  open: vi.fn<TerminalApi['open']>(),
+  write: vi.fn<TerminalApi['write']>(),
+  resize: vi.fn<TerminalApi['resize']>(),
+  onData: vi.fn<TerminalApi['onData']>(),
+  onExit: vi.fn<TerminalApi['onExit']>(),
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -156,6 +197,11 @@ beforeEach(() => {
   update.check.mockResolvedValue({ commits: [] });
   update.install.mockReset().mockResolvedValue(undefined);
   window.update = update;
+  screenText.length = 0;
+  terminal.open.mockResolvedValue('');
+  terminal.onData.mockImplementation(() => () => undefined);
+  terminal.onExit.mockImplementation(() => () => undefined);
+  window.terminal = terminal;
   Element.prototype.scrollIntoView = () => undefined;
 });
 
@@ -1991,4 +2037,51 @@ it("suggests the workspace's lockfile install as worktree setup and saves an ove
   });
   await user.clear(field);
   expect(JSON.parse(localStorage.getItem('setup')!)).toEqual({});
+});
+
+it('opens the workspace terminal from the backlog or Ctrl+`, keeping its display and shell alive', async () => {
+  const user = await open();
+  const dialog = () => screen.queryByRole('dialog', { name: 'Terminal' });
+  let shellOutput: (cwd: string, data: string) => void = () => undefined;
+  let shellExit: (cwd: string) => void = () => undefined;
+  terminal.onData.mockImplementation((fn) => {
+    shellOutput = fn;
+    return () => undefined;
+  });
+  terminal.onExit.mockImplementation((fn) => {
+    shellExit = fn;
+    return () => undefined;
+  });
+
+  await user.click(screen.getByRole('button', { name: '[ TERMINAL ]' }));
+  expect(dialog()).toBeInTheDocument();
+  await vi.waitFor(() =>
+    expect(terminal.open).toHaveBeenCalledWith('/proj', 80, 24),
+  );
+  typeInTerminal('pwd\r');
+  expect(terminal.write).toHaveBeenCalledWith('/proj', 'pwd\r');
+  shellOutput('/other', 'elsewhere');
+  shellOutput('/proj', '/proj\r\n');
+  expect(screenText).toEqual(['/proj\r\n']);
+
+  fireEvent.keyDown(dialog()!, { key: 't', ctrlKey: true });
+  expect(
+    screen.getByRole('button', { name: 'Hide backlog' }),
+  ).toBeInTheDocument();
+
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  expect(dialog()).toBeNull();
+  shellOutput('/proj', 'while hidden\r\n');
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  expect(dialog()).toBeInTheDocument();
+  expect(terminal.open).toHaveBeenCalledTimes(1);
+  expect(screenText).toEqual(['/proj\r\n', 'while hidden\r\n']);
+  await user.click(screen.getByRole('button', { name: '[ CLOSE ]' }));
+  expect(dialog()).toBeNull();
+
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  act(() => shellExit('/proj'));
+  expect(dialog()).toBeNull();
+  await user.keyboard('{Control>}[Backquote]{/Control}');
+  await vi.waitFor(() => expect(terminal.open).toHaveBeenCalledTimes(2));
 });

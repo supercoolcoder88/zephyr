@@ -3,6 +3,7 @@ import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { registerAgentIpc } from './agent';
 import { registerBacklogIpc } from './backlog';
+import { registerTerminalIpc } from './terminal';
 import { registerUpdateIpc } from './update';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -65,6 +66,7 @@ app.whenReady().then(() => {
   registerAgentIpc();
   registerBacklogIpc();
   registerUpdateIpc();
+  registerTerminalIpc();
   createWindow();
 
   // On OS X it's common to re-create a window in the app when the

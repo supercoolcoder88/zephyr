@@ -6,6 +6,7 @@ import type {
   AgentEvent,
   BacklogEntry,
   BacklogApi,
+  TerminalApi,
   UpdateApi,
 } from './agent-types';
 
@@ -76,3 +77,21 @@ contextBridge.exposeInMainWorld('update', {
   check: () => ipcRenderer.invoke('update:check'),
   install: (workspace) => ipcRenderer.invoke('update:install', workspace),
 } satisfies UpdateApi);
+contextBridge.exposeInMainWorld('terminal', {
+  open: (cwd, cols, rows) =>
+    ipcRenderer.invoke('terminal:open', cwd, cols, rows),
+  write: (cwd, data) => ipcRenderer.send('terminal:write', cwd, data),
+  resize: (cwd, cols, rows) =>
+    ipcRenderer.send('terminal:resize', cwd, cols, rows),
+  onData: (listener) => {
+    const handler = (_: IpcRendererEvent, cwd: string, data: string) =>
+      listener(cwd, data);
+    ipcRenderer.on('terminal:data', handler);
+    return () => ipcRenderer.off('terminal:data', handler);
+  },
+  onExit: (listener) => {
+    const handler = (_: IpcRendererEvent, cwd: string) => listener(cwd);
+    ipcRenderer.on('terminal:exit', handler);
+    return () => ipcRenderer.off('terminal:exit', handler);
+  },
+} satisfies TerminalApi);

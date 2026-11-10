@@ -208,3 +208,12 @@ export interface UpdateApi {
   // Quits, installs the update and relaunches into workspace; resolves to an error if the pull fails.
   install(workspace: string): Promise<string | undefined>;
 }
+
+export interface TerminalApi {
+  // Starts the workspace shell if needed and resolves to its recent output.
+  open(cwd: string, cols: number, rows: number): Promise<string>;
+  write(cwd: string, data: string): void;
+  resize(cwd: string, cols: number, rows: number): void;
+  onData(listener: (cwd: string, data: string) => void): () => void;
+  onExit(listener: (cwd: string) => void): () => void;
+}
