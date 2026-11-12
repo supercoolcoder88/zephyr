@@ -14,9 +14,12 @@ import type {
   ModelChoice,
   SlashCommand,
 } from '../../agent-types';
+import { read, write } from '../../storage';
 import Button from '../ui/Button';
 import ModelPicker from './ModelPicker';
 import BranchPicker from './BranchPicker';
+
+export const DEFAULT_MODEL: ModelChoice = { model: 'opus' };
 
 // Cached per workspace until its skills change on disk.
 const catalogs = new Map<string, ReturnType<AgentApi['catalog']>>();
@@ -93,11 +96,9 @@ export default function Composer({
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [catalogStale, setCatalogStale] = useState(0);
   // Cached so the composer shows the model and effort before the catalog loads.
-  const [models, setModels] = useState<Model[]>(() =>
-    JSON.parse(localStorage.getItem('models') ?? '[]'),
-  );
+  const [models, setModels] = useState<Model[]>(() => read('models', []));
   const [choice, setChoice] = useState<ModelChoice>(() =>
-    JSON.parse(localStorage.getItem('model') ?? '{"model":"opus"}'),
+    read('model', DEFAULT_MODEL),
   );
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -160,7 +161,7 @@ export default function Composer({
         if (!live) return;
         setCommands(c.commands);
         setModels(c.models);
-        localStorage.setItem('models', JSON.stringify(c.models));
+        write('models', c.models);
       })
       .catch(() => {});
     return () => {
@@ -233,7 +234,7 @@ export default function Composer({
 
   function choose(next: ModelChoice) {
     setChoice(next);
-    localStorage.setItem('model', JSON.stringify(next));
+    write('model', next);
   }
 
   // Commands that take arguments are completed; the rest run straight away.

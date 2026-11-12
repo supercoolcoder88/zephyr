@@ -8,6 +8,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import { EventEmitter } from 'node:events';
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const sdk = vi.hoisted(() => ({
@@ -16,10 +17,11 @@ const sdk = vi.hoisted(() => ({
   query: vi.fn(),
   deleteSession: vi.fn(),
 }));
+const send = vi.hoisted(() => vi.fn());
 
 vi.mock('electron', () => ({
   app: { isPackaged: false },
-  BrowserWindow: {},
+  BrowserWindow: { getAllWindows: () => [{ webContents: { send } }] },
   dialog: {},
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
@@ -234,9 +236,8 @@ it('gives a thread its own ignored worktree and removes it on delete, keeping th
 
 it('sets a worktree up with its env and setup command, then squash merges its work and removes it', async () => {
   const { execFileSync } = await import('node:child_process');
-  const { existsSync, lstatSync } = await import('node:fs');
-  const { mkdir, mkdtemp, readFile, writeFile } =
-    await import('node:fs/promises');
+  const { existsSync } = await import('node:fs');
+  const { mkdtemp, readFile, writeFile } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const path = await import('node:path');
   const repo = await mkdtemp(path.join(tmpdir(), 'zephyr-merge-'));
@@ -332,18 +333,12 @@ const lastQuery = () => sdk.query.mock.results.at(-1)!.value as FakeQuery;
 
 function sender() {
   const sent: [string, unknown][] = [];
-  const destroyed: (() => void)[] = [];
-  return {
-    sent,
-    destroy: () => destroyed.forEach((f) => f()),
-    target: {
-      isDestroyed: () => false,
-      once: (_: string, f: () => void) => destroyed.push(f),
-      off: vi.fn(),
-      send: (_: string, runId: string, event: unknown) =>
-        sent.push([runId, event]),
-    },
-  };
+  const target = Object.assign(new EventEmitter(), {
+    isDestroyed: () => false,
+    send: (_: string, runId: string, event: unknown) =>
+      sent.push([runId, event]),
+  });
+  return { sent, target };
 }
 
 const userMessage = (content: unknown) => ({
@@ -601,7 +596,7 @@ describe('agent:send', () => {
     const reopened = lastQuery();
     await send(s, 's7', 'a');
     const other = lastQuery();
-    s.destroy();
+    s.target.emit('destroyed');
     expect(reopened.close).toHaveBeenCalled();
     expect(other.close).toHaveBeenCalled();
     await vi.waitFor(() =>
@@ -611,6 +606,24 @@ describe('agent:send', () => {
         ['s7', { type: 'end' }],
       ]),
     );
+  });
+
+  it.each([
+    ['the page reloads', 'did-navigate', true],
+    ['the render process crashes', 'render-process-gone', true],
+    ['the page navigates within the document', 'did-navigate-in-page', false],
+  ])('when %s (%s), closes its sessions: %s', async (_, event, closes) => {
+    const s = sender();
+    await send(s, 'g1', 'a');
+    const waiting = lastQuery();
+    const pending = ask({ command: 'ls' }, 'g-r1');
+    await send(s, 'g2', 'a');
+    const other = lastQuery();
+    s.target.emit(event);
+    expect(waiting.close).toHaveBeenCalledTimes(closes ? 1 : 0);
+    expect(other.close).toHaveBeenCalledTimes(closes ? 1 : 0);
+    if (!closes) return;
+    await expect(pending.result).resolves.toMatchObject({ behavior: 'deny' });
   });
 
   const ask = (input: unknown, requestId: string, title?: string) => {
@@ -836,13 +849,27 @@ describe('agent:catalog', () => {
     expect(close).toHaveBeenCalled();
     expect(sdk.query.mock.lastCall![0].options.permissionMode).toBe('default');
 
+    const other = path.join(root, 'other');
     await rm(path.join(user, 'skills', 'mine'), { recursive: true });
-    const later = await invoke('agent:catalog', path.join(root, 'other'));
+    const later = await invoke('agent:catalog', other);
     expect(later).toEqual({
       commands: [{ name: 'compact', description: 'Compact', argumentHint: '' }],
       models: [],
     });
     expect(sdk.query).toHaveBeenCalledTimes(1);
+
+    // The user skill removed above concerns every workspace; a project command only its own.
+    await vi.waitFor(() =>
+      expect(send.mock.calls).toEqual([
+        ['agent:catalog-change', proj],
+        ['agent:catalog-change', other],
+      ]),
+    );
+    send.mockClear();
+    await writeFile(path.join(proj, '.claude', 'commands', 'new.md'), 'New\n');
+    await vi.waitFor(() =>
+      expect(send.mock.calls).toEqual([['agent:catalog-change', proj]]),
+    );
   });
 });
 

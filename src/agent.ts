@@ -245,39 +245,46 @@ function shownText(text: string) {
 
 const watchedSkills = new Set<string>();
 
-// Tells renderers to refetch cwd's catalog when a user or project skill or command changes on disk.
-function watchSkills(cwd: string) {
-  if (watchedSkills.has(cwd)) return;
-  watchedSkills.add(cwd);
+const notifyCatalog = (cwd: string) => {
+  for (const w of BrowserWindow.getAllWindows())
+    w.webContents.send('agent:catalog-change', cwd);
+};
+
+function watchCatalogRoot(root: string, onChange: () => void) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const changed = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      for (const w of BrowserWindow.getAllWindows())
-        w.webContents.send('agent:catalog-change', cwd);
-    }, 500);
+    timer = setTimeout(onChange, 500);
   };
-  for (const root of [userDir(), path.join(cwd, '.claude')]) {
-    const watching = new Set<string>();
-    const attach = () => {
-      for (const name of ['skills', 'commands']) {
-        if (watching.has(name)) continue;
-        try {
-          watch(path.join(root, name), { recursive: true }, changed);
-          watching.add(name);
-        } catch {}
-      }
-    };
-    attach();
-    // A skills or commands folder created later gets watched once it appears.
-    try {
-      watch(root, (_, file) => {
-        if (file !== 'skills' && file !== 'commands') return;
-        attach();
-        changed();
-      });
-    } catch {}
-  }
+  const watching = new Set<string>();
+  const attach = () => {
+    for (const name of ['skills', 'commands']) {
+      if (watching.has(name)) continue;
+      try {
+        watch(path.join(root, name), { recursive: true }, changed);
+        watching.add(name);
+      } catch {}
+    }
+  };
+  attach();
+  // A skills or commands folder created later gets watched once it appears.
+  try {
+    watch(root, (_, file) => {
+      if (file !== 'skills' && file !== 'commands') return;
+      attach();
+      changed();
+    });
+  } catch {}
+}
+
+// Tells renderers to refetch cwd's catalog when a user or project skill or command changes on disk.
+function watchSkills(cwd: string) {
+  if (watchedSkills.has(cwd)) return;
+  // The user dir is shared, so only the first workspace sets it up.
+  if (watchedSkills.size === 0)
+    watchCatalogRoot(userDir(), () => watchedSkills.forEach(notifyCatalog));
+  watchedSkills.add(cwd);
+  watchCatalogRoot(path.join(cwd, '.claude'), () => notifyCatalog(cwd));
 }
 
 const userDir = () =>
@@ -582,7 +589,11 @@ export function registerAgentIpc() {
         },
       };
       sessions.set(runId, session);
-      target.once('destroyed', session.close);
+      // A reloaded or crashed renderer keeps its WebContents; did-navigate skips in-page navigations.
+      target
+        .on('destroyed', session.close)
+        .on('did-navigate', session.close)
+        .on('render-process-gone', session.close);
       (async () => {
         try {
           for await (const m of q) {
@@ -615,7 +626,10 @@ export function registerAgentIpc() {
           session.busy();
           for (const answer of answers.values()) answer(false);
           if (sessions.get(runId) === session) sessions.delete(runId);
-          target.off('destroyed', session.close);
+          target
+            .off('destroyed', session.close)
+            .off('did-navigate', session.close)
+            .off('render-process-gone', session.close);
           send(target, runId, { type: 'end' });
         }
       })();
@@ -843,15 +857,12 @@ export function registerAgentIpc() {
             : [],
         );
         for (const b of blocks) {
+          if (b.type !== 'tool_result' || typeof b.content !== 'string')
+            continue;
           const asked = items.find(
             (i) => i.type === 'tool' && i.id === b.tool_use_id,
           );
-          if (
-            b.type === 'tool_result' &&
-            asked?.type === 'tool' &&
-            asked.name === 'AskUserQuestion' &&
-            typeof b.content === 'string'
-          )
+          if (asked?.type === 'tool' && asked.name === 'AskUserQuestion')
             asked.input = {
               ...(asked.input as object),
               answers: storedAnswers(asked.input, b.content),

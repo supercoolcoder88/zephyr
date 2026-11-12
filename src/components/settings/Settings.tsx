@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Permission, UpdateStatus, UsageWindow } from '../../agent-types';
+import { read, write } from '../../storage';
 import Button from '../ui/Button';
 import useDismiss from '../ui/useDismiss';
 
@@ -105,7 +106,7 @@ export default function Settings({
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
   const [cycle, setCycle] = useState(localStorage.getItem('cycle') ?? 'active');
   const [setups, setSetups] = useState<Record<string, string>>(() =>
-    JSON.parse(localStorage.getItem('setup') ?? '{}'),
+    read('setup', {}),
   );
   const [detected, setDetected] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
@@ -132,8 +133,8 @@ export default function Settings({
     // Usage only refreshes after a reply, so the last one seen covers a fresh launch.
     window.agent.usage().then(
       (u) => {
-        if (u) localStorage.setItem('usage', JSON.stringify(u));
-        setUsage(u ?? JSON.parse(localStorage.getItem('usage') ?? 'null'));
+        if (u) write('usage', u);
+        setUsage(u ?? read('usage', null));
       },
       () => setUsage('error'),
     );
@@ -238,7 +239,7 @@ export default function Settings({
                   onChange={(e) => {
                     const next = { ...setups, [workspace]: e.target.value };
                     if (!e.target.value) delete next[workspace];
-                    localStorage.setItem('setup', JSON.stringify(next));
+                    write('setup', next);
                     setSetups(next);
                   }}
                   className="h-8 w-64 border border-line bg-transparent px-3 text-sm outline-none placeholder:text-mute focus:border-line-strong"

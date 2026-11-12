@@ -222,6 +222,14 @@ export default memo(function Item({
             rehypePlugins={[rehypeHighlight]}
             components={{
               a: (props) => <a {...props} target="_blank" />,
+              img: ({ src, alt }) =>
+                typeof src === 'string' && src ? (
+                  <a href={src} target="_blank">
+                    {alt || src}
+                  </a>
+                ) : (
+                  alt
+                ),
               table: (props) => (
                 <div className="overflow-x-auto">
                   <table {...props} />

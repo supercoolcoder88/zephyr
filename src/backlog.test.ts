@@ -1,9 +1,39 @@
 // @vitest-environment node
+import { unwatchFile } from 'node:fs';
 import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { beforeAll, expect, it, vi } from 'vitest';
 import type { BacklogEntry, BacklogEdit } from './agent-types';
+
+const polled = new Map<string, number>();
+const held = new Map<string, Promise<void>>();
+
+vi.mock('node:fs/promises', async (original) => {
+  const fs = await original<typeof import('node:fs/promises')>();
+  return {
+    ...fs,
+    readFile: async (file: string, ...rest: unknown[]) => {
+      await held.get(file);
+      return (fs.readFile as (...a: unknown[]) => unknown)(file, ...rest);
+    },
+  };
+});
+
+vi.mock('node:fs', async (original) => {
+  const fs = await original<typeof import('node:fs')>();
+  return {
+    ...fs,
+    watchFile: (file: string, ...rest: unknown[]) => {
+      polled.set(file, (polled.get(file) ?? 0) + 1);
+      return (fs.watchFile as (...a: unknown[]) => unknown)(file, ...rest);
+    },
+    unwatchFile: (file: string, ...rest: unknown[]) => {
+      polled.delete(file);
+      return (fs.unwatchFile as (...a: unknown[]) => unknown)(file, ...rest);
+    },
+  };
+});
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -125,4 +155,26 @@ it('writes edits to a self-ignoring .zephyr folder in order', async () => {
   await expect(
     readFile(path.join(existing, '.zephyr', '.gitignore')),
   ).rejects.toThrow();
+});
+
+it('polls only the latest workspace when an earlier watch read resolves last', async () => {
+  const [a, b] = await Promise.all(
+    [0, 1].map(() => mkdtemp(path.join(os.tmpdir(), 'backlog-'))),
+  );
+  const [fileA, fileB] = [a, b].map((cwd) =>
+    path.join(cwd, '.zephyr', 'backlog.md'),
+  );
+  const watch = (cwd: string) =>
+    handlers.get('backlog:watch')!(
+      { sender: { isDestroyed: () => false, send: () => {} } },
+      cwd,
+    );
+  let release!: () => void;
+  held.set(fileA, new Promise((resolve) => (release = resolve)));
+  const first = watch(a);
+  expect(await watch(b)).toEqual([]);
+  release();
+  expect(await first).toEqual([]);
+  expect([...polled]).toEqual([[fileB, 1]]);
+  unwatchFile(fileB);
 });

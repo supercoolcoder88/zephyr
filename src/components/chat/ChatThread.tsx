@@ -237,16 +237,23 @@ export default function ChatThread({
                 [ RESOLVE WITH AGENT ]
               </Button>
             )}
-            {permissions.map((request) =>
-              request.tool === 'AskUserQuestion' ? (
-                <Questions
-                  key={request.id}
-                  input={request.input}
-                  onAnswer={(answers) =>
-                    onAnswer(request.id, !!answers, answers)
-                  }
-                />
-              ) : (
+            {permissions.map((request) => {
+              if (request.tool === 'AskUserQuestion')
+                return (
+                  <Questions
+                    key={request.id}
+                    input={request.input}
+                    onAnswer={(answers) =>
+                      onAnswer(request.id, !!answers, answers)
+                    }
+                  />
+                );
+              const { command } = request.input as { command?: unknown };
+              const title =
+                typeof command === 'string'
+                  ? request.title
+                  : (request.title ?? summarize(request.input));
+              return (
                 <div
                   key={request.id}
                   role="group"
@@ -257,9 +264,14 @@ export default function ChatThread({
                     <p className="text-2xs tracking-widest text-mute uppercase">
                       {request.tool}
                     </p>
-                    <p className="text-sm break-words">
-                      {request.title ?? summarize(request.input)}
-                    </p>
+                    {title && title !== command && (
+                      <p className="text-sm break-words">{title}</p>
+                    )}
+                    {typeof command === 'string' && (
+                      <p className="text-sm break-words whitespace-pre-wrap">
+                        {command}
+                      </p>
+                    )}
                   </div>
                   <div className="flex shrink-0 gap-2">
                     <Button
@@ -278,8 +290,8 @@ export default function ChatThread({
                     </Button>
                   </div>
                 </div>
-              ),
-            )}
+              );
+            })}
           </div>
         )}
       </div>

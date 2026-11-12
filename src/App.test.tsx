@@ -330,6 +330,25 @@ it('opens the folder it was launched with as one empty draft', async () => {
   expect(agent.loadThread).not.toHaveBeenCalled();
 });
 
+it('starts and stays usable when saved state is unparseable', async () => {
+  for (const key of ['projects', 'archived', 'context', 'model', 'models'])
+    localStorage.setItem(key, 'not json{');
+  agent.listThreads.mockResolvedValue(list);
+  const user = await open();
+  expect(sidebarTitles()).toEqual(['Newest', 'Older']);
+  await sendPrompt(user, 'still works');
+  expect(agent.send).toHaveBeenLastCalledWith(
+    expect.any(String),
+    'still works',
+    [],
+    '/proj',
+    'b',
+    { model: 'opus' },
+    'auto',
+    expect.any(String),
+  );
+});
+
 it('lists sessions, opens the newest folded to its answer and loads each thread once', async () => {
   localStorage.setItem('context', JSON.stringify({ a: 33 }));
   agent.listThreads.mockResolvedValue(list);
@@ -511,6 +530,7 @@ it('keeps drafts with text at the top and drops untouched ones', async () => {
 
 it('deletes threads after confirmation, moving to the next one or a fresh draft', async () => {
   agent.listThreads.mockResolvedValue(withOldest);
+  localStorage.setItem('context', JSON.stringify({ a: 33, b: 50 }));
   agent.loadThread.mockImplementation(async (id: string) => [
     { type: 'text', text: `body ${id}` },
   ]);
@@ -533,6 +553,7 @@ it('deletes threads after confirmation, moving to the next one or a fresh draft'
 
   await remove(user, /Older/);
   expect(agent.deleteThread).toHaveBeenCalledWith('a', '/proj', undefined);
+  expect(JSON.parse(localStorage.getItem('context')!)).toEqual({ b: 50 });
   expect(sidebarTitles()).toEqual(['Newest', 'Oldest']);
   expect(heading()).toBe('Newest');
 
@@ -1147,6 +1168,16 @@ it.each([
   },
 );
 
+it('keeps a running thread running when a message queued into it is rejected', async () => {
+  const user = await running();
+  agent.send.mockRejectedValueOnce(new Error('model unavailable'));
+  await sendPrompt(user, 'also this');
+  expect(await screen.findByText('model unavailable')).toBeInTheDocument();
+  expect(screen.queryByText('also this')).toBeNull();
+  expect(screen.getByRole('status', { name: 'Working' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '[ STOP ]' })).toBeInTheDocument();
+});
+
 it('stops the turn without ending the session, showing a failed stop as an error', async () => {
   agent.listThreads.mockResolvedValue(list);
   const user = await running();
@@ -1442,7 +1473,7 @@ it('asks to allow or deny a tool call, marking the thread as waiting', async () 
   const [card] = permissionCards();
   expect(card).toHaveTextContent('Bash');
   expect(card).toHaveTextContent('rm -rf x');
-  expect(card.textContent).not.toMatch(/more/);
+  expect(card).toHaveTextContent('more');
   await user.click(within(card).getByRole('button', { name: '[ ALLOW ]' }));
   expect(agent.answerPermission).toHaveBeenCalledWith(
     runId,
@@ -1972,6 +2003,59 @@ it('runs a thread on the current branch, or in a new worktree picked before its 
   expect(agent.send.mock.lastCall!.slice(3, 5)).toEqual([tree, 'wt']);
 });
 
+async function pendingWorktree() {
+  const tree = '/proj/.zephyr/worktrees/abc';
+  let ready!: () => void;
+  agent.createWorktree.mockReturnValue(
+    new Promise((resolve) => {
+      ready = () => resolve({ path: tree, branch: 'zephyr/abc' });
+    }),
+  );
+  const user = await open();
+  await user.click(await screen.findByRole('button', { name: 'main' }));
+  await user.click(screen.getByRole('menuitemradio', { name: 'New worktree' }));
+  await sendPrompt(user, 'first');
+  return { user, tree, ready };
+}
+
+it('never sends messages stopped while the worktree is still being created, keeping the worktree', async () => {
+  const { user, tree, ready } = await pendingWorktree();
+  await sendPrompt(user, 'second');
+  await user.click(screen.getByRole('button', { name: '[ STOP ]' }));
+  expect(screen.queryByText('second')).toBeNull();
+  await act(async () => ready());
+  expect(agent.send).not.toHaveBeenCalled();
+  expect(await screen.findByText('STOPPED')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '[ STOP ]' })).toBeNull();
+
+  await sendPrompt(user, 'again');
+  expect(agent.createWorktree).toHaveBeenCalledTimes(1);
+  expect(agent.send).toHaveBeenCalledTimes(1);
+  expect(agent.send.mock.lastCall![1]).toBe('again');
+  expect(agent.send.mock.lastCall![3]).toBe(tree);
+});
+
+it('still sends a message queued after a stop that came before the worktree was ready', async () => {
+  const { user, ready } = await pendingWorktree();
+  await user.click(screen.getByRole('button', { name: '[ STOP ]' }));
+  await sendPrompt(user, 'third');
+  await act(async () => ready());
+  expect(agent.send).toHaveBeenCalledTimes(1);
+  expect(agent.send.mock.lastCall![1]).toBe('third');
+});
+
+it("keeps a thread's first message waiting on its worktree when another thread is stopped", async () => {
+  const { user, ready } = await pendingWorktree();
+  await user.click(screen.getByRole('button', { name: 'New in proj' }));
+  await sendPrompt(user, 'other');
+  await user.click(screen.getByRole('button', { name: '[ STOP ]' }));
+  await act(async () => ready());
+  expect(agent.send.mock.calls.map((c) => c[1])).toEqual(['other', 'first']);
+  await user.click(screen.getByRole('button', { name: /first/ }));
+  expect(heading()).toBe('first');
+  expect(screen.queryByText('STOPPED')).toBeNull();
+});
+
 it('lists worktree sessions with the workspace, loading and deleting them in their worktree', async () => {
   const tree = '/proj/.zephyr/worktrees/x';
   agent.listThreads.mockResolvedValue([
@@ -2026,6 +2110,30 @@ it('merges an idle worktree thread from its branch label, retrying after an agen
   expect(agent.deleteThread).toHaveBeenCalledWith('b', '/proj', tree);
   expect(sidebarTitles()).toEqual(['Older']);
   expect(screen.queryByRole('button', { name: /^Merge/ })).toBeNull();
+});
+
+it('keeps the thread opened during a merge once the merge removes its own thread', async () => {
+  const tree = '/proj/.zephyr/worktrees/x';
+  agent.branch.mockImplementation(async (cwd: string) =>
+    cwd === tree ? 'zephyr/x' : 'main',
+  );
+  agent.listThreads.mockResolvedValue([
+    { ...withOldest[0], worktree: tree, branch: 'zephyr/x' },
+    ...withOldest.slice(1),
+  ]);
+  let merged!: () => void;
+  agent.mergeWorktree.mockReturnValue(
+    new Promise<void>((resolve) => (merged = resolve)),
+  );
+  const user = await open();
+  await user.click(
+    await screen.findByRole('button', { name: 'Merge zephyr/x' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Confirm merge' }));
+  await user.click(screen.getByRole('button', { name: /Oldest/ }));
+  await act(async () => merged());
+  expect(sidebarTitles()).toEqual(['Older', 'Oldest']);
+  expect(heading()).toBe('Oldest');
 });
 
 it("suggests the workspace's lockfile install as worktree setup and saves an override per workspace", async () => {

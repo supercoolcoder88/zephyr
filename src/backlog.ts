@@ -80,6 +80,7 @@ export function apply(content: string, edit: BacklogEdit) {
 }
 
 let watched: { cwd: string; sender: WebContents; content: string } | undefined;
+let watchCalls = 0;
 // Edits run one at a time so two quick clicks never read the same stale file.
 let edits = Promise.resolve();
 
@@ -91,7 +92,10 @@ function unwatch() {
 export function registerBacklogIpc() {
   ipcMain.handle('backlog:watch', async (event, cwd: string) => {
     unwatch();
+    const call = ++watchCalls;
     const current = { cwd, sender: event.sender, content: await read(cwd) };
+    // A newer call arrived while we read, so it owns the poller.
+    if (call !== watchCalls) return parse(current.content);
     watched = current;
     // Polling stat survives the file being created later or replaced by a rename.
     watchFile(fileOf(cwd), { interval: 500 }, async () => {

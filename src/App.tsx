@@ -8,6 +8,8 @@ import {
 } from 'react-resizable-panels';
 import ChatThread from './components/chat/ChatThread';
 import Sidebar from './components/sidebar/Sidebar';
+import { read, write } from './storage';
+import { DEFAULT_MODEL } from './components/composer/Composer';
 import Backlog, { backlogType } from './components/backlog/Backlog';
 import Button from './components/ui/Button';
 import type { Image, ModelChoice, Permission, ThreadItem } from './agent-types';
@@ -23,15 +25,11 @@ import {
 type Listed = Awaited<ReturnType<typeof window.agent.listThreads>>;
 
 const MAX_PROJECTS = 4;
-const stored = (key: string): string[] =>
-  JSON.parse(localStorage.getItem(key) ?? '[]');
 
 // Keeps unsent drafts and running threads the list doesn't know about yet,
 // plus loaded transcripts and render keys of listed threads.
 function merge(mine: Thread[], cwd: string, list: Listed): Thread[] {
-  const saved: Record<string, number> = JSON.parse(
-    localStorage.getItem('context') ?? '{}',
-  );
+  const saved = read<Record<string, number>>('context', {});
   return [
     ...mine.filter(
       (t) => (t.draft || busy(t)) && !list.some((l) => l.id === t.id),
@@ -63,8 +61,12 @@ function merge(mine: Thread[], cwd: string, list: Listed): Thread[] {
 }
 
 export default function App() {
-  const [projects, setProjects] = useState(() => stored('projects'));
-  const [collapsed, setCollapsed] = useState(() => stored('collapsed'));
+  const [projects, setProjects] = useState(() =>
+    read<string[]>('projects', []),
+  );
+  const [collapsed, setCollapsed] = useState(() =>
+    read<string[]>('collapsed', []),
+  );
   const [threads, render] = useState<Thread[]>([]);
   // Mirrors threads synchronously so IPC events read the latest runs.
   const latest = useRef(threads);
@@ -78,11 +80,9 @@ export default function App() {
   const [error, setError] = useState<string>();
   const [booted, setBooted] = useState(false);
   const [choices, setChoices] = useState<ArchiveChoices>(() =>
-    JSON.parse(localStorage.getItem('archived') ?? '{}'),
+    read('archived', {}),
   );
-  const [pins, setPins] = useState<Pins>(() =>
-    JSON.parse(localStorage.getItem('pinned') ?? '{}'),
-  );
+  const [pins, setPins] = useState<Pins>(() => read('pinned', {}));
   const [dragging, setDragging] = useState<boolean | 'new' | 'chat'>(false);
   const sidebarLayout = useDefaultLayout({
     id: 'sidebar',
@@ -229,13 +229,10 @@ export default function App() {
           }));
         }
         if (event.type === 'context') {
-          localStorage.setItem(
-            'context',
-            JSON.stringify({
-              ...JSON.parse(localStorage.getItem('context') ?? '{}'),
-              [thread.id]: event.percentage,
-            }),
-          );
+          write('context', {
+            ...read('context', {}),
+            [thread.id]: event.percentage,
+          });
           return patch(thread.id, (t) => ({ ...t, context: event.percentage }));
         }
         if (event.type === 'permission-end') {
@@ -289,12 +286,15 @@ export default function App() {
   const { current, archived } = listThreads(visible, choices, pins, activeKey);
   const active =
     visible.find((t) => t.key === activeKey) ?? current[0] ?? visible[0];
+  // Async work like a merge finishes after the render that started it.
+  const view = useRef({ active, current });
+  view.current = { active, current };
 
   function choose(id: string, value: true | number | undefined) {
     setChoices((prev) => {
       const { [id]: _, ...next } = prev;
       if (value !== undefined) next[id] = value;
-      localStorage.setItem('archived', JSON.stringify(next));
+      write('archived', next);
       return next;
     });
   }
@@ -303,7 +303,7 @@ export default function App() {
     setPins((prev) => {
       const { [id]: _, ...next } = prev;
       if (value) next[id] = Date.now();
-      localStorage.setItem('pinned', JSON.stringify(next));
+      write('pinned', next);
       return next;
     });
   }
@@ -329,8 +329,7 @@ export default function App() {
             .createWorktree(
               cwd,
               id.slice(0, 8),
-              JSON.parse(localStorage.getItem('setup') ?? '{}')[cwd] ||
-                undefined,
+              read<Record<string, string>>('setup', {})[cwd] || undefined,
             )
             .then(({ path, branch, setup }) => {
               patch(id, (t) => ({ ...t, worktree: path, branch }));
@@ -365,22 +364,42 @@ export default function App() {
     }));
     setFinishedKey(undefined);
     dir
-      .then((d) =>
-        window.agent.send(
-          runId,
-          prompt,
-          images,
-          d,
-          draft ? undefined : id,
-          choice,
-          permission,
-          uuid,
-        ),
-      )
+      .then((d) => {
+        // A stop while the worktree was being created cancels the message.
+        const t = runOf(runId);
+        if (
+          queue
+            ? t?.queued?.some((q) => q.uuid === uuid)
+            : t?.run?.phase !== 'stopping'
+        )
+          return window.agent.send(
+            runId,
+            prompt,
+            images,
+            d,
+            draft ? undefined : id,
+            choice,
+            permission,
+            uuid,
+          );
+        if (queue) return;
+        patchRun(runId, (t) => ({
+          ...t,
+          status: 'error',
+          updatedAt: Date.now(),
+          items: [...(t.items ?? []), { type: 'error', message: 'STOPPED' }],
+        }));
+        finish(runId);
+      })
       .catch((err) => {
+        report(runOf(runId)!.id)(err);
+        if (queue)
+          return patchRun(runId, (t) => ({
+            ...t,
+            queued: t.queued?.filter((q) => q.uuid !== uuid),
+          }));
         // A failed worktree is retried on the next send.
         patchRun(runId, (t) => ({ ...t, run: { ...t.run!, dir: undefined } }));
-        report(runOf(runId)!.id)(err);
         finish(runId);
       });
   }
@@ -453,7 +472,7 @@ export default function App() {
   }
 
   async function remove(id: string) {
-    const thread = visible.find((t) => t.id === id)!;
+    const thread = latest.current.find((t) => t.id === id)!;
     if (busy(thread)) return;
     setError(undefined);
     if (thread.run) await window.agent.close(thread.run.id);
@@ -468,9 +487,11 @@ export default function App() {
     setThreads((prev) => prev.filter((t) => t.id !== id));
     choose(id, undefined);
     pin(id, false);
-    if (thread !== active) return;
-    const siblings = current.filter((t) => t.cwd === thread.cwd);
-    const i = siblings.indexOf(thread);
+    const { [id]: _, ...context } = read<Record<string, number>>('context', {});
+    write('context', context);
+    if (view.current.active?.key !== thread.key) return;
+    const siblings = view.current.current.filter((t) => t.cwd === thread.cwd);
+    const i = siblings.findIndex((t) => t.key === thread.key);
     const next = siblings[i + 1] ?? siblings[i - 1];
     if (next) return select(next);
     const fresh = newThread(thread.cwd);
@@ -501,7 +522,7 @@ export default function App() {
     send(
       `Merging this worktree into ${base} hit conflicts. Merge ${base} into this branch, resolve the conflicts keeping the intent of both sides, run the tests, and commit the merge.`,
       [],
-      JSON.parse(localStorage.getItem('model') ?? '{"model":"opus"}'),
+      read('model', DEFAULT_MODEL),
     );
   }
 
@@ -519,7 +540,7 @@ export default function App() {
   function saveProjects(update: (prev: string[]) => string[]) {
     setProjects((prev) => {
       const next = update(prev);
-      localStorage.setItem('projects', JSON.stringify(next));
+      write('projects', next);
       return next;
     });
   }
@@ -529,7 +550,7 @@ export default function App() {
       const next = prev.includes(cwd)
         ? prev.filter((p) => p !== cwd)
         : [...prev, cwd];
-      localStorage.setItem('collapsed', JSON.stringify(next));
+      write('collapsed', next);
       return next;
     });
   }
