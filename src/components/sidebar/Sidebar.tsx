@@ -12,7 +12,13 @@ import {
 } from 'lucide-react';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { Permission, UpdateStatus } from '../../agent-types';
-import { stateDot, threadState, type Pins, type Thread } from '../../thread';
+import {
+  busy,
+  stateDot,
+  threadState,
+  type Pins,
+  type Thread,
+} from '../../thread';
 import Button from '../ui/Button';
 import Settings from '../settings/Settings';
 
@@ -29,7 +35,6 @@ interface Props {
   pinned: Pins;
   onPin(id: string, value: boolean): void;
   activeId: string;
-  runningIds: string[];
   onSelect(id: string): void;
   onNew(cwd?: string): void;
   onDelete(id: string): void;
@@ -60,7 +65,6 @@ export default function Sidebar({
   pinned,
   onPin,
   activeId,
-  runningIds,
   onSelect,
   onNew,
   onDelete,
@@ -101,7 +105,7 @@ export default function Sidebar({
               (t) =>
                 t.id === activeId ||
                 t.id === lastRead.current ||
-                threadState(t, runningIds) !== 'read',
+                threadState(t) !== 'read',
             );
       const i = cycle.findIndex((t) => t.id === activeId);
       const next = cycle.at((i + (e.shiftKey ? -1 : 1)) % cycle.length);
@@ -125,7 +129,7 @@ export default function Sidebar({
     const isPinned = thread.id in pinned;
     return (
       <div
-        key={thread.key ?? thread.id}
+        key={thread.key}
         onMouseLeave={() => setConfirmId(undefined)}
         onKeyDown={(e) => e.key === 'Escape' && setConfirmId(undefined)}
         onBlur={(e) =>
@@ -142,8 +146,8 @@ export default function Sidebar({
           className="flex min-w-0 flex-1 items-center gap-2 px-4 py-2 text-left text-sm"
         >
           <span
-            aria-label={threadState(thread, runningIds)}
-            className={`mx-1 size-1.5 shrink-0 ${stateDot[threadState(thread, runningIds)]}`}
+            aria-label={threadState(thread)}
+            className={`mx-1 size-1.5 shrink-0 ${stateDot[threadState(thread)]}`}
           />
           <span className="min-w-0 flex-1">
             <span className="block truncate">{thread.title}</span>
@@ -176,7 +180,7 @@ export default function Sidebar({
             </span>
           )}
         </button>
-        {!runningIds.includes(thread.id) && (
+        {!busy(thread) && (
           <span
             className={`absolute inset-y-0 right-0 flex items-center gap-1 bg-inherit pr-4 pl-3 transition-opacity duration-150 ease-mech ${
               confirming

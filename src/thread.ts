@@ -31,7 +31,7 @@ export interface Thread {
   createdAt: number;
   updatedAt: number;
   // Outcome of the last run, cleared once the user has seen it.
-  status?: 'attention' | 'error' | 'done';
+  status?: 'error' | 'done';
   // Undefined until the session transcript is loaded.
   items?: ThreadItem[];
   // Subagents spawned by runs since the thread was opened.
@@ -47,8 +47,15 @@ export interface Thread {
   images?: Image[];
   // Percent of the context window used, known once a run finishes a turn.
   context?: number;
-  // Original draft id, kept as the React key so promotion doesn't remount.
-  key?: string;
+  // Stable for the thread's life; a draft's id changes when its session starts.
+  key: string;
+  // The session driving this thread, keyed by a renderer-chosen run id.
+  run?: {
+    id: string;
+    phase: 'starting' | 'running' | 'stopping' | 'idle';
+    // Where the session runs, known once an isolated thread's worktree exists.
+    dir?: Promise<string>;
+  };
   // A draft that gets its own worktree when its first message is sent.
   isolated?: true;
   // The thread's git worktree folder and branch, when it runs in one.
@@ -58,9 +65,12 @@ export interface Thread {
   conflict?: true;
 }
 
-export function threadState(thread: Thread, runningIds: string[]): ThreadState {
+export const busy = (thread: Thread) =>
+  !!thread.run && thread.run.phase !== 'idle';
+
+export function threadState(thread: Thread): ThreadState {
   if (thread.permissions?.length) return 'attention';
-  if (runningIds.includes(thread.id)) return 'running';
+  if (busy(thread)) return 'running';
   if (thread.draft && (thread.prompt?.trim() || thread.images?.length))
     return 'draft';
   // Merging removes the worktree, so any thread still in one is unmerged.
@@ -68,8 +78,10 @@ export function threadState(thread: Thread, runningIds: string[]): ThreadState {
 }
 
 export function newThread(cwd: string): Thread {
+  const id = crypto.randomUUID();
   return {
-    id: crypto.randomUUID(),
+    id,
+    key: id,
     title: 'New thread',
     cwd,
     createdAt: Date.now(),
@@ -91,17 +103,16 @@ export function listThreads(
   threads: Thread[],
   choices: ArchiveChoices,
   pins: Pins,
-  activeId: string | undefined,
-  runningIds: string[],
+  activeKey: string | undefined,
 ) {
   const today = new Date().setHours(0, 0, 0, 0);
   const archived = threads.filter((t) => {
-    const state = threadState(t, runningIds);
+    const state = threadState(t);
     if (t.draft || t.id in pins || (state !== 'read' && state !== 'unmerged'))
       return false;
     return t.id in choices
       ? choices[t.id] === true
-      : state === 'read' && t.updatedAt < today && t.id !== activeId;
+      : state === 'read' && t.updatedAt < today && t.key !== activeKey;
   });
   const listedAt = (t: Thread) =>
     Math.max(t.createdAt, Number(choices[t.id] ?? 0));

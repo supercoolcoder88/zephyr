@@ -47,6 +47,7 @@ const view = (
   <Drafted
     thread={{
       id: 't1',
+      key: 't1',
       title: 'Thread',
       cwd: '/proj',
       createdAt: 0,
@@ -147,6 +148,7 @@ const renderQuote = () => {
     <Drafted
       thread={{
         id: 't1',
+        key: 't1',
         title: 'Thread',
         cwd: '/proj',
         createdAt: 0,
@@ -233,6 +235,7 @@ it('ignores collapsed, blank and out-of-transcript selections', async () => {
 it('shows a prompt set from outside without remounting', () => {
   const thread = {
     id: 't1',
+    key: 't1',
     title: 'Thread',
     cwd: '/proj',
     createdAt: 0,

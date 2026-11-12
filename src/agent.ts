@@ -393,6 +393,12 @@ async function cliCatalog() {
 }
 
 let catalog: ReturnType<typeof cliCatalog> | undefined;
+// Called at app launch so models are ready before the first composer asks.
+export const loadCatalog = () =>
+  (catalog ??= cliCatalog().catch((err) => {
+    catalog = undefined;
+    throw err;
+  }));
 let usage: UsageWindow[] | null = null;
 
 async function refreshUsage(q: Query) {
@@ -891,11 +897,7 @@ export function registerAgentIpc() {
       cwd: string,
     ): Promise<{ commands: SlashCommand[]; models: Model[] }> => {
       watchSkills(cwd);
-      catalog ??= cliCatalog().catch((err) => {
-        catalog = undefined;
-        throw err;
-      });
-      const [cli, disk] = await Promise.all([catalog, diskCommands(cwd)]);
+      const [cli, disk] = await Promise.all([loadCatalog(), diskCommands(cwd)]);
       const byName = new Map(
         [...cli.commands, ...disk].map((c) => [c.name, c]),
       );

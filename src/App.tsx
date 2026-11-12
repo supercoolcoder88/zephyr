@@ -12,6 +12,7 @@ import Backlog, { backlogType } from './components/backlog/Backlog';
 import Button from './components/ui/Button';
 import type { Image, ModelChoice, Permission, ThreadItem } from './agent-types';
 import {
+  busy,
   listThreads,
   newThread,
   type ArchiveChoices,
@@ -27,19 +28,13 @@ const stored = (key: string): string[] =>
 
 // Keeps unsent drafts and running threads the list doesn't know about yet,
 // plus loaded transcripts and render keys of listed threads.
-function merge(
-  mine: Thread[],
-  cwd: string,
-  list: Listed,
-  running: string[],
-): Thread[] {
+function merge(mine: Thread[], cwd: string, list: Listed): Thread[] {
   const saved: Record<string, number> = JSON.parse(
     localStorage.getItem('context') ?? '{}',
   );
   return [
     ...mine.filter(
-      (t) =>
-        (t.draft || running.includes(t.id)) && !list.some((l) => l.id === t.id),
+      (t) => (t.draft || busy(t)) && !list.some((l) => l.id === t.id),
     ),
     ...list.map(({ id, title, createdAt, updatedAt, worktree, branch }) => {
       const known = mine.find((t) => t.id === id);
@@ -56,7 +51,8 @@ function merge(
         subthreads: known?.subthreads,
         permissions: known?.permissions,
         queued: known?.queued,
-        key: known?.key,
+        key: known?.key ?? id,
+        run: known?.run,
         prompt: known?.prompt,
         images: known?.images,
         context: known?.context ?? saved[id],
@@ -69,10 +65,16 @@ function merge(
 export default function App() {
   const [projects, setProjects] = useState(() => stored('projects'));
   const [collapsed, setCollapsed] = useState(() => stored('collapsed'));
-  const [threads, setThreads] = useState<Thread[]>([]);
-  const [activeId, setActiveId] = useState<string>();
-  const [runningIds, setRunningIds] = useState<string[]>([]);
-  const [finishedId, setFinishedId] = useState<string>();
+  const [threads, render] = useState<Thread[]>([]);
+  // Mirrors threads synchronously so IPC events read the latest runs.
+  const latest = useRef(threads);
+  function setThreads(update: (prev: Thread[]) => Thread[]) {
+    latest.current = update(latest.current);
+    render(latest.current);
+  }
+  // Thread keys, which survive a draft's promotion.
+  const [activeKey, setActiveKey] = useState<string>();
+  const [finishedKey, setFinishedKey] = useState<string>();
   const [error, setError] = useState<string>();
   const [booted, setBooted] = useState(false);
   const [choices, setChoices] = useState<ArchiveChoices>(() =>
@@ -89,32 +91,24 @@ export default function App() {
   const [permission, setPermission] = useState(
     () => (localStorage.getItem('mode') ?? 'auto') as Permission,
   );
-  // Run id -> the thread whose session it drives; a draft's id changes when its session starts.
-  const runs = useRef(
-    new Map<
-      string,
-      {
-        id: string;
-        cwd: string;
-        draft?: true;
-        running?: boolean;
-        stopping?: boolean;
-        // Where the session runs, known once an isolated thread's worktree exists.
-        dir?: Promise<string>;
-      }
-    >(),
-  );
   // Threads whose current run is resolving merge conflicts.
   const resolving = useRef(new Set<string>());
-  const runningThreads = () =>
-    [...runs.current.values()].filter((r) => r.running).map((r) => r.id);
-  const runOf = (id: string) =>
-    [...runs.current].find(([, r]) => r.id === id)?.[0];
+  const runOf = (runId: string) =>
+    latest.current.find((t) => t.run?.id === runId);
   const composer = useRef<HTMLTextAreaElement>(null);
 
   function patch(id: string, update: (thread: Thread) => Thread) {
     setThreads((prev) => prev.map((t) => (t.id === id ? update(t) : t)));
   }
+
+  function patchRun(runId: string, update: (thread: Thread) => Thread) {
+    setThreads((prev) =>
+      prev.map((t) => (t.run?.id === runId ? update(t) : t)),
+    );
+  }
+
+  const phase = (runId: string, phase: NonNullable<Thread['run']>['phase']) =>
+    patchRun(runId, (t) => ({ ...t, run: { ...t.run!, phase } }));
 
   function append(id: string, item: ThreadItem) {
     patch(id, (t) => ({ ...t, items: [...(t.items ?? []), item] }));
@@ -134,21 +128,19 @@ export default function App() {
   }
 
   async function finish(runId: string) {
-    const run = runs.current.get(runId);
-    if (!run?.running) return;
-    run.running = false;
-    run.stopping = false;
+    const thread = runOf(runId);
+    if (!thread || !busy(thread)) return;
     // An interrupted turn never reports its subagents ending.
-    patch(run.id, (t) => ({
+    patchRun(runId, (t) => ({
       ...t,
+      run: { ...t.run!, phase: 'idle' },
       permissions: undefined,
       subthreads: t.subthreads?.map((s) =>
         s.state === 'running' ? { ...s, state: 'read' } : s,
       ),
     }));
-    setFinishedId(run.id);
-    setRunningIds((prev) => prev.filter((t) => t !== run.id));
-    const { cwd } = run;
+    setFinishedKey(thread.key);
+    const { cwd } = thread;
     const list = await window.agent.listThreads(cwd);
     setThreads((prev) => [
       ...prev.filter((t) => t.cwd !== cwd),
@@ -156,7 +148,6 @@ export default function App() {
         prev.filter((t) => t.cwd === cwd),
         cwd,
         list,
-        runningThreads(),
       ),
     ]);
   }
@@ -164,10 +155,11 @@ export default function App() {
   useEffect(
     () =>
       window.agent.onEvent((runId, event) => {
-        const run = runs.current.get(runId);
-        if (!run) return;
+        const thread = runOf(runId);
+        if (!thread) return;
+        const { phase: current } = thread.run!;
         if (event.type === 'end') {
-          patch(run.id, (t) =>
+          patch(thread.id, (t) =>
             t.queued?.length
               ? {
                   ...t,
@@ -182,7 +174,7 @@ export default function App() {
           return finish(runId);
         }
         if (event.type === 'picked') {
-          return patch(run.id, (t) => {
+          return patch(thread.id, (t) => {
             const picked = t.queued?.filter((q) => event.ids.includes(q.uuid));
             if (!picked?.length) return t;
             return {
@@ -192,10 +184,10 @@ export default function App() {
             };
           });
         }
-        if (event.type === 'done' && run.stopping) {
-          run.stopping = false;
-          patch(run.id, (t) => ({
+        if (event.type === 'done' && current === 'stopping') {
+          patch(thread.id, (t) => ({
             ...t,
+            run: { ...t.run!, phase: 'running' },
             status: 'error',
             updatedAt: Date.now(),
             items: [...(t.items ?? []), { type: 'error', message: 'STOPPED' }],
@@ -204,27 +196,27 @@ export default function App() {
         }
         if (event.type === 'state') {
           if (event.state === 'idle') finish(runId);
-          if (event.state === 'running' && !run.running) {
-            run.running = true;
-            setFinishedId(undefined);
-            setRunningIds((prev) =>
-              prev.includes(run.id) ? prev : [...prev, run.id],
-            );
+          if (
+            event.state === 'running' &&
+            (current === 'idle' || current === 'starting')
+          ) {
+            phase(runId, 'running');
+            setFinishedKey(undefined);
           }
           return;
         }
         if (event.type === 'done' || event.type === 'error') {
           const status = event.type === 'done' && event.ok ? 'done' : 'error';
-          patch(run.id, (t) => ({ ...t, status, updatedAt: Date.now() }));
+          patch(thread.id, (t) => ({ ...t, status, updatedAt: Date.now() }));
         }
         if (event.type === 'permission') {
-          return patch(run.id, (t) => ({
+          return patch(thread.id, (t) => ({
             ...t,
             permissions: [...(t.permissions ?? []), event.request],
           }));
         }
         if (event.type === 'answers') {
-          return patch(run.id, (t) => ({
+          return patch(thread.id, (t) => ({
             ...t,
             items: t.items?.map((i) =>
               i.type === 'tool' && i.id === event.id
@@ -241,17 +233,17 @@ export default function App() {
             'context',
             JSON.stringify({
               ...JSON.parse(localStorage.getItem('context') ?? '{}'),
-              [run.id]: event.percentage,
+              [thread.id]: event.percentage,
             }),
           );
-          return patch(run.id, (t) => ({ ...t, context: event.percentage }));
+          return patch(thread.id, (t) => ({ ...t, context: event.percentage }));
         }
         if (event.type === 'permission-end') {
-          return dropPermission(run.id, event.id);
+          return dropPermission(thread.id, event.id);
         }
         if (event.type === 'subthread') {
           const { id, title } = event;
-          return patch(run.id, (t) => ({
+          return patch(thread.id, (t) => ({
             ...t,
             subthreads: [
               ...(t.subthreads ?? []),
@@ -260,7 +252,7 @@ export default function App() {
           }));
         }
         if (event.type === 'subthread-output') {
-          return patch(run.id, (t) => ({
+          return patch(thread.id, (t) => ({
             ...t,
             subthreads: t.subthreads?.map((s) =>
               s.id === event.id
@@ -270,7 +262,7 @@ export default function App() {
           }));
         }
         if (event.type === 'subthread-end') {
-          return patch(run.id, (t) => ({
+          return patch(thread.id, (t) => ({
             ...t,
             subthreads: t.subthreads?.map((s) =>
               s.id === event.id
@@ -279,21 +271,14 @@ export default function App() {
             ),
           }));
         }
-        if (event.type !== 'session') return append(run.id, event);
-        if (!run.draft) return;
+        if (event.type !== 'session') return append(thread.id, event);
+        if (!thread.draft) return;
         // A draft becomes a real thread once Claude assigns its session id.
-        const { sessionId } = event;
-        runs.current.set(runId, { ...run, id: sessionId, draft: undefined });
-        patch(run.id, (t) => ({
+        patch(thread.id, (t) => ({
           ...t,
-          key: t.key ?? t.id,
-          id: sessionId,
+          id: event.sessionId,
           draft: undefined,
         }));
-        setActiveId((a) => (a === run.id ? sessionId : a));
-        setRunningIds((prev) =>
-          prev.map((id) => (id === run.id ? sessionId : id)),
-        );
       }),
     [],
   );
@@ -301,15 +286,9 @@ export default function App() {
   const visible = threads
     .filter((t) => projects.includes(t.cwd))
     .toSorted((a, b) => b.createdAt - a.createdAt);
-  const { current, archived } = listThreads(
-    visible,
-    choices,
-    pins,
-    activeId,
-    runningIds,
-  );
+  const { current, archived } = listThreads(visible, choices, pins, activeKey);
   const active =
-    visible.find((t) => t.id === activeId) ?? current[0] ?? visible[0];
+    visible.find((t) => t.key === activeKey) ?? current[0] ?? visible[0];
 
   function choose(id: string, value: true | number | undefined) {
     setChoices((prev) => {
@@ -332,17 +311,19 @@ export default function App() {
   function send(prompt: string, images: Image[], choice: ModelChoice) {
     if (!active) return;
     setError(undefined);
-    const { id, cwd, draft, isolated, worktree } = active;
+    const { id, cwd, draft, isolated, worktree, run } = latest.current.find(
+      (t) => t.key === active.key,
+    )!;
     const uuid = crypto.randomUUID();
     const message = {
       type: 'user' as const,
       text: prompt,
       ...(images.length > 0 && { images }),
     };
-    const runId = runOf(id) ?? crypto.randomUUID();
-    const queue = runs.current.get(runId)?.running;
+    const runId = run?.id ?? crypto.randomUUID();
+    const queue = run && run.phase !== 'idle';
     const dir =
-      runs.current.get(runId)?.dir ??
+      run?.dir ??
       (isolated && !worktree
         ? window.agent
             .createWorktree(
@@ -377,20 +358,12 @@ export default function App() {
       status: undefined,
       updatedAt: Date.now(),
       images: undefined,
+      run: { id: runId, dir, phase: queue ? run.phase : 'starting' },
       ...(queue
         ? { queued: [...(t.queued ?? []), { ...message, uuid }] }
         : { items: [...(t.items ?? []), message] }),
     }));
-    runs.current.set(runId, {
-      ...runs.current.get(runId),
-      id,
-      cwd,
-      draft,
-      running: true,
-      dir,
-    });
-    setRunningIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    setFinishedId(undefined);
+    setFinishedKey(undefined);
     dir
       .then((d) =>
         window.agent.send(
@@ -406,8 +379,8 @@ export default function App() {
       )
       .catch((err) => {
         // A failed worktree is retried on the next send.
-        runs.current.get(runId)!.dir = undefined;
-        report(runs.current.get(runId)!.id)(err);
+        patchRun(runId, (t) => ({ ...t, run: { ...t.run!, dir: undefined } }));
+        report(runOf(runId)!.id)(err);
         finish(runId);
       });
   }
@@ -428,8 +401,8 @@ export default function App() {
           : t,
       ),
     );
-    setActiveId(thread.id);
-    setFinishedId(undefined);
+    setActiveKey(thread.key);
+    setFinishedKey(undefined);
     setError(undefined);
     if (thread.items) return;
     window.agent.loadThread(thread.id, thread.worktree ?? thread.cwd).then(
@@ -481,13 +454,9 @@ export default function App() {
 
   async function remove(id: string) {
     const thread = visible.find((t) => t.id === id)!;
-    if (runningIds.includes(id)) return;
+    if (busy(thread)) return;
     setError(undefined);
-    const runId = runOf(id);
-    if (runId) {
-      runs.current.delete(runId);
-      await window.agent.close(runId);
-    }
+    if (thread.run) await window.agent.close(thread.run.id);
     if (!thread.draft) {
       try {
         await window.agent.deleteThread(id, thread.cwd, thread.worktree);
@@ -538,14 +507,14 @@ export default function App() {
 
   // Retries the merge once the agent resolving its conflicts finishes cleanly.
   useEffect(() => {
-    const thread = visible.find((t) => t.id === finishedId);
+    const thread = visible.find((t) => t.key === finishedKey);
     if (
       thread &&
       resolving.current.delete(thread.id) &&
       thread.status === 'done'
     )
       mergeWorktree(thread);
-  }, [finishedId]);
+  }, [finishedKey]);
 
   function saveProjects(update: (prev: string[]) => string[]) {
     setProjects((prev) => {
@@ -568,10 +537,9 @@ export default function App() {
   async function load(cwd: string) {
     const list = await window.agent.listThreads(cwd);
     const mine = merge(
-      threads.filter((t) => t.cwd === cwd),
+      latest.current.filter((t) => t.cwd === cwd),
       cwd,
       list,
-      runningThreads(),
     );
     const loaded = mine.length ? mine : [newThread(cwd)];
     setThreads((prev) => [...prev.filter((t) => t.cwd !== cwd), ...loaded]);
@@ -594,9 +562,9 @@ export default function App() {
     setError(undefined);
     saveProjects((prev) => prev.filter((p) => p !== cwd));
     window.terminal.close(cwd);
-    for (const [runId, run] of runs.current) {
-      if (run.cwd === cwd && !run.running)
-        window.agent.close(runId).catch(report(run.id));
+    for (const t of latest.current) {
+      if (t.cwd === cwd && t.run?.phase === 'idle')
+        window.agent.close(t.run.id).catch(report(t.id));
     }
     const next = [...current, ...archived].find((t) => t.cwd !== cwd);
     if (active?.cwd === cwd && next) select(next);
@@ -674,7 +642,6 @@ export default function App() {
             pinned={pins}
             onPin={pin}
             activeId={active.id}
-            runningIds={runningIds}
             onSelect={(id) => select(visible.find((t) => t.id === id)!)}
             onNew={(cwd) => create(undefined, cwd)}
             onDelete={remove}
@@ -683,8 +650,11 @@ export default function App() {
             onPermission={(next) => {
               setPermission(next);
               localStorage.setItem('mode', next);
-              for (const [runId, run] of runs.current) {
-                window.agent.setPermission(runId, next).catch(report(run.id));
+              for (const t of latest.current) {
+                if (t.run)
+                  window.agent
+                    .setPermission(t.run.id, next)
+                    .catch(report(t.id));
               }
             }}
           />
@@ -749,10 +719,10 @@ export default function App() {
                 </div>
               )}
               <ChatThread
-                key={active.key ?? active.id}
+                key={active.key}
                 thread={active}
-                running={runningIds.includes(active.id)}
-                justFinished={finishedId === active.id}
+                running={busy(active)}
+                justFinished={finishedKey === active.key}
                 onSend={send}
                 onPrompt={(prompt) =>
                   patch(active.id, (t) => ({ ...t, prompt }))
@@ -772,17 +742,16 @@ export default function App() {
                   }))
                 }
                 onCancel={() => {
-                  const runId = runOf(active.id);
-                  const run = runId && runs.current.get(runId);
+                  const { run } = active;
                   if (!run) return;
-                  run.stopping = run.running;
+                  if (busy(active)) phase(run.id, 'stopping');
                   patch(active.id, (t) => ({ ...t, queued: undefined }));
-                  window.agent.interrupt(runId).catch(report(active.id));
+                  window.agent.interrupt(run.id).catch(report(active.id));
                 }}
                 onAnswer={(id, allow, answers) => {
                   dropPermission(active.id, id);
                   window.agent
-                    .answerPermission(runOf(active.id)!, id, allow, answers)
+                    .answerPermission(active.run!.id, id, allow, answers)
                     .catch(report(active.id));
                 }}
                 composer={composer}

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, shell } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
-import { registerAgentIpc } from './agent';
+import { loadCatalog, registerAgentIpc } from './agent';
 import { registerBacklogIpc } from './backlog';
 import { registerTerminalIpc } from './terminal';
 import { registerUpdateIpc } from './update';
@@ -64,6 +64,7 @@ app.whenReady().then(() => {
   // The default menu carries Chromium's zoom, reload and devtools accelerators.
   Menu.setApplicationMenu(null);
   registerAgentIpc();
+  loadCatalog().catch(() => {});
   registerBacklogIpc();
   registerUpdateIpc();
   registerTerminalIpc();
