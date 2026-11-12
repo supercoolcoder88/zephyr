@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { Model, ModelChoice } from '../../agent-types';
 import Button from '../ui/Button';
 import MenuItem from '../ui/MenuItem';
@@ -26,6 +27,26 @@ export default function ModelPicker({ models, choice, onChoose }: Props) {
   }
 
   useDismiss(root, picking, () => setPicking(false));
+
+  const onKey = useEffectEvent((e: KeyboardEvent) => {
+    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'm') return;
+    if (document.querySelector('[aria-modal]')) return;
+    e.preventDefault();
+    if (picking) {
+      setPicking(false);
+      return trigger.current?.focus();
+    }
+    flushSync(() => setPicking(true));
+    picker.current
+      ?.querySelector<HTMLElement>('[aria-checked=true]')
+      ?.focus();
+  });
+
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKey(e);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
 
   return (
     <div

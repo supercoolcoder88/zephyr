@@ -42,6 +42,7 @@ const hotkeys = [
   ['Open settings', 'Ctrl + ,'],
   ['Toggle backlog', 'Ctrl + T'],
   ['Toggle terminal', 'Ctrl + `'],
+  ['Pick model', 'Ctrl + M'],
   ['Close popup', 'Esc'],
 ];
 

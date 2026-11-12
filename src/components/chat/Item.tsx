@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -19,12 +19,17 @@ const index = (n: number) => (
   </span>
 );
 
+// Unsent picks by request id, so switching threads doesn't drop them.
+const drafts = new Map<string, { picked: string[][]; other: string[] }>();
+
 // Selectable while onAnswer is given; answering with nothing skips the questions.
 export function Questions({
+  id,
   input,
   live = false,
   onAnswer,
 }: {
+  id?: string;
   input: unknown;
   live?: boolean;
   onAnswer?(answers?: Record<string, string>): void;
@@ -33,10 +38,16 @@ export function Questions({
     questions: Question[];
     answers?: Record<string, string>;
   };
-  const [picked, setPicked] = useState<string[][]>(() =>
-    questions.map(() => []),
+  const draft = id ? drafts.get(id) : undefined;
+  const [picked, setPicked] = useState<string[][]>(
+    () => draft?.picked ?? questions.map(() => []),
   );
-  const [other, setOther] = useState(() => questions.map(() => ''));
+  const [other, setOther] = useState(
+    () => draft?.other ?? questions.map(() => ''),
+  );
+  useEffect(() => {
+    if (id) drafts.set(id, { picked, other });
+  }, [id, picked, other]);
   const reply = (i: number) =>
     [...picked[i], other[i].trim()].filter(Boolean).join(', ');
   const ready = questions.every((_, i) => reply(i));

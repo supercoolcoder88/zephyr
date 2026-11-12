@@ -242,6 +242,7 @@ export default function ChatThread({
                 return (
                   <Questions
                     key={request.id}
+                    id={request.id}
                     input={request.input}
                     onAnswer={(answers) =>
                       onAnswer(request.id, !!answers, answers)

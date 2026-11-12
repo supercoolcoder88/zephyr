@@ -61,6 +61,7 @@ export default function TerminalDialog({ cwd, onClose }: Props) {
 
   useEffect(() => {
     let closed = false;
+    let replayed = false;
     const t = new Terminal({
       fontSize: 13,
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue(
@@ -75,14 +76,17 @@ export default function TerminalDialog({ cwd, onClose }: Props) {
     fit.fit();
     const observer = new ResizeObserver(() => fit.fit());
     observer.observe(screen.current!);
-    const input = t.onData((data) => window.terminal.write(cwd, data));
+    const input = t.onData(
+      (data) => replayed && window.terminal.write(cwd, data),
+    );
     const resize = t.onResize(({ cols, rows }) =>
       window.terminal.resize(cwd, cols, rows),
     );
     let output = () => {};
     void window.terminal.open(cwd, t.cols, t.rows).then((saved) => {
       if (closed) return;
-      t.write(saved);
+      // Replayed output holds the shell's old terminal queries; their answers must not reach it.
+      t.write(saved, () => (replayed = true));
       output = window.terminal.onData(
         (from, data) => from === cwd && t.write(data),
       );

@@ -39,8 +39,11 @@ vi.mock('@xterm/xterm', () => ({
     open() {}
     focus() {}
     dispose() {}
-    write(data: string) {
+    // Like xterm, answers a cursor position query as if typed.
+    write(data: string, done?: () => void) {
       if (data) screenText.push(data);
+      if (data.includes('\x1b[6n')) typeInTerminal('\x1b[1;1R');
+      done?.();
     }
     onData(fn: (data: string) => void) {
       typeInTerminal = fn;
@@ -973,6 +976,14 @@ it('picks a model and effort from the keyboard', async () => {
   await user.keyboard('{Enter}{Escape}');
   expect(screen.queryByRole('menu')).toBeNull();
   expect(picker).toHaveFocus();
+
+  await user.keyboard('{Control>}m{/Control}');
+  expect(
+    screen.getByRole('menuitemradio', { name: /Sonnet 5.5/ }),
+  ).toHaveFocus();
+  await user.keyboard('{Control>}m{/Control}');
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(picker).toHaveFocus();
 });
 
 it("lists a turn's subthreads and opens one in a popup", async () => {
@@ -1457,6 +1468,37 @@ it('shows a pending question in a box that takes picked options or a skip', asyn
     false,
     undefined,
   );
+});
+
+it('keeps unsent answers to a pending question when switching threads', async () => {
+  agent.listThreads.mockResolvedValue(list);
+  agent.loadThread.mockResolvedValue([]);
+  const user = await running();
+  act(() =>
+    permission('r1', 'AskUserQuestion', {
+      questions: [
+        {
+          question: 'Which?',
+          header: 'Pick',
+          options: [
+            { label: 'A', description: '' },
+            { label: 'B', description: '' },
+          ],
+        },
+      ],
+    }),
+  );
+  await user.click(screen.getByRole('radio', { name: /B/ }));
+  await user.type(screen.getByRole('textbox', { name: 'Other' }), 'C');
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  expect(screen.queryByRole('radio')).toBeNull();
+  await user.click(screen.getByRole('button', { name: /Newest/ }));
+  expect(screen.getByRole('textbox', { name: 'Other' })).toHaveValue('C');
+  await user.clear(screen.getByRole('textbox', { name: 'Other' }));
+  await user.click(screen.getByRole('radio', { name: /B/ }));
+  await user.click(screen.getByRole('button', { name: /Older/ }));
+  await user.click(screen.getByRole('button', { name: /Newest/ }));
+  expect(screen.getByRole('radio', { name: /B/ })).toBeChecked();
 });
 
 it('asks to allow or deny a tool call, marking the thread as waiting', async () => {
@@ -2186,12 +2228,18 @@ it('opens the workspace terminal from the backlog or Ctrl+`, keeping its shell a
 
   await user.keyboard('{Control>}[Backquote]{/Control}');
   expect(dialog()).toBeNull();
-  terminal.open.mockResolvedValueOnce('/proj\r\nwhile hidden\r\n');
+  terminal.open.mockResolvedValueOnce('/proj\r\n\x1b[6nwhile hidden\r\n');
   await user.keyboard('{Control>}[Backquote]{/Control}');
   expect(dialog()).toBeInTheDocument();
   await vi.waitFor(() =>
-    expect(screenText).toEqual(['/proj\r\n', '/proj\r\nwhile hidden\r\n']),
+    expect(screenText).toEqual([
+      '/proj\r\n',
+      '/proj\r\n\x1b[6nwhile hidden\r\n',
+    ]),
   );
+  expect(terminal.write).not.toHaveBeenCalledWith('/proj', '\x1b[1;1R');
+  typeInTerminal('ls\r');
+  expect(terminal.write).toHaveBeenLastCalledWith('/proj', 'ls\r');
   expect(terminal.open).toHaveBeenCalledTimes(2);
   await user.click(screen.getByRole('button', { name: '[ CLOSE ]' }));
   expect(dialog()).toBeNull();
