@@ -1,8 +1,29 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { FitAddon, init, Terminal } from 'ghostty-web';
+import { FitAddon } from '@xterm/addon-fit';
+import { Terminal, type ITheme } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import Button from '../ui/Button';
 
-const ready = init();
+const palette = (): ITheme => {
+  const css = getComputedStyle(document.documentElement);
+  const color = (name: string) =>
+    css.getPropertyValue(`--color-${name}`).trim();
+  return {
+    background: color('void'),
+    foreground: color('ink'),
+    cursor: color('ink'),
+    selectionBackground: color('line-strong'),
+    black: color('line'),
+    brightBlack: color('mute'),
+    red: color('code-red'),
+    green: color('code-green'),
+    yellow: color('code-yellow'),
+    blue: color('code-blue'),
+    magenta: color('code-purple'),
+    cyan: color('code-cyan'),
+    white: color('ink'),
+  };
+};
 
 const watchTheme = (onChange: () => void) => {
   const observer = new MutationObserver(onChange);
@@ -18,14 +39,18 @@ interface Props {
   onClose(): void;
 }
 
-// Unmounted when closed, as ghostty-web redraws every frame; reopening replays the shell's saved output.
+// Unmounted when closed; reopening replays the shell's saved output.
 export default function TerminalDialog({ cwd, onClose }: Props) {
   const screen = useRef<HTMLDivElement>(null);
-  // ghostty-web can't restyle a live display, so a theme change rebuilds it from the shell's saved output.
+  const term = useRef<Terminal>(null);
   const theme = useSyncExternalStore(
     watchTheme,
     () => document.documentElement.dataset.theme,
   );
+
+  useEffect(() => {
+    if (term.current) term.current.options.theme = palette();
+  }, [theme]);
 
   useEffect(() => {
     const previous = document.activeElement;
@@ -35,58 +60,44 @@ export default function TerminalDialog({ cwd, onClose }: Props) {
   }, []);
 
   useEffect(() => {
-    const cleanup: (() => void)[] = [];
     let closed = false;
-    ready.then(async () => {
-      if (closed || !screen.current) return;
-      const css = getComputedStyle(document.documentElement);
-      const color = (name: string) =>
-        css.getPropertyValue(`--color-${name}`).trim();
-      const t = new Terminal({
-        fontSize: 13,
-        fontFamily: css.getPropertyValue('--font-mono'),
-        theme: {
-          background: color('void'),
-          foreground: color('ink'),
-          cursor: color('ink'),
-          selectionBackground: color('line-strong'),
-          black: color('line'),
-          brightBlack: color('mute'),
-          red: color('code-red'),
-          green: color('code-green'),
-          yellow: color('code-yellow'),
-          blue: color('code-blue'),
-          magenta: color('code-purple'),
-          cyan: color('code-cyan'),
-          white: color('ink'),
-        },
-      });
-      const fit = new FitAddon();
-      t.loadAddon(fit);
-      t.open(screen.current);
-      fit.fit();
-      fit.observeResize();
-      cleanup.push(() => t.dispose());
-      const output = await window.terminal.open(cwd, t.cols, t.rows);
+    const t = new Terminal({
+      fontSize: 13,
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue(
+        '--font-mono',
+      ),
+      theme: palette(),
+    });
+    term.current = t;
+    const fit = new FitAddon();
+    t.loadAddon(fit);
+    t.open(screen.current!);
+    fit.fit();
+    const observer = new ResizeObserver(() => fit.fit());
+    observer.observe(screen.current!);
+    const input = t.onData((data) => window.terminal.write(cwd, data));
+    const resize = t.onResize(({ cols, rows }) =>
+      window.terminal.resize(cwd, cols, rows),
+    );
+    let output = () => {};
+    void window.terminal.open(cwd, t.cols, t.rows).then((saved) => {
       if (closed) return;
-      // Empty for a new shell, and ghostty-web throws on an empty write.
-      if (output) t.write(output);
-      if (!screen.current.closest('[inert]')) t.focus();
-      const input = t.onData((data) => window.terminal.write(cwd, data));
-      const resize = t.onResize(({ cols, rows }) =>
-        window.terminal.resize(cwd, cols, rows),
+      t.write(saved);
+      output = window.terminal.onData(
+        (from, data) => from === cwd && t.write(data),
       );
-      cleanup.push(
-        () => input.dispose(),
-        () => resize.dispose(),
-        window.terminal.onData((from, data) => from === cwd && t.write(data)),
-      );
+      if (!screen.current?.closest('[inert]')) t.focus();
     });
     return () => {
       closed = true;
-      cleanup.forEach((fn) => fn());
+      observer.disconnect();
+      input.dispose();
+      resize.dispose();
+      output();
+      t.dispose();
+      term.current = null;
     };
-  }, [cwd, theme]);
+  }, [cwd]);
 
   return (
     <div

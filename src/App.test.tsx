@@ -20,21 +20,27 @@ import type {
 // jsdom has no canvas, so the terminal records what it is asked to show.
 const screenText: string[] = [];
 let typeInTerminal: (data: string) => void;
-vi.mock('ghostty-web', () => ({
-  init: async () => undefined,
+let restyled = 0;
+vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
     fit() {}
-    observeResize() {}
   },
+}));
+vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 80;
     rows = 24;
+    options = {
+      set theme(_: unknown) {
+        restyled++;
+      },
+    };
     loadAddon() {}
     open() {}
     focus() {}
     dispose() {}
     write(data: string) {
-      screenText.push(data);
+      if (data) screenText.push(data);
     }
     onData(fn: (data: string) => void) {
       typeInTerminal = fn;
@@ -2097,7 +2103,7 @@ it('opens the workspace terminal from the backlog or Ctrl+`, keeping its shell a
   ).not.toBeInTheDocument();
 });
 
-it('rebuilds the terminal on a theme change, drops it on a workspace switch and kills the shell when its project closes', async () => {
+it('restyles the terminal on a theme change without reopening its shell, drops it on a workspace switch and kills the shell when its project closes', async () => {
   agent.listThreads.mockImplementation(async (cwd: string) =>
     cwd === '/proj'
       ? list
@@ -2115,7 +2121,8 @@ it('rebuilds the terminal on a theme change, drops it on a workspace switch and 
   await vi.waitFor(() => expect(opened('/proj')).toBe(1));
   document.documentElement.dataset.theme =
     theme === 'cyber' ? 'light' : 'cyber';
-  await vi.waitFor(() => expect(opened('/proj')).toBe(2));
+  await vi.waitFor(() => expect(restyled).toBe(1));
+  expect(opened('/proj')).toBe(1);
   await user.keyboard('{Control>}[Backquote]{/Control}');
 
   await user.click(screen.getByRole('button', { name: /Other/ }));
@@ -2124,7 +2131,7 @@ it('rebuilds the terminal on a theme change, drops it on a workspace switch and 
   await user.keyboard('{Control>}[Backquote]{/Control}');
   await user.click(screen.getByRole('button', { name: /Newest/ }));
   await user.keyboard('{Control>}[Backquote]{/Control}');
-  await vi.waitFor(() => expect(opened('/proj')).toBe(3));
+  await vi.waitFor(() => expect(opened('/proj')).toBe(2));
   await user.keyboard('{Control>}[Backquote]{/Control}');
 
   await user.click(screen.getByRole('button', { name: 'Close proj' }));
